@@ -2,3 +2,8 @@ node_modules/
 .npm-cache/
 dist/
 *.tsbuildinfo
+.next/
+.env
+.env.local
+*.log
+.DS_Store

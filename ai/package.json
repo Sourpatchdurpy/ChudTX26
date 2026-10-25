@@ -1,0 +1,13 @@
+{
+  "name": "@game/ai",
+  "private": true,
+  "type": "module",
+  "exports": "./index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "tsx --test tests/*.test.ts",
+    "lab": "tsx scripts/ai-lab.ts"
+  },
+  "dependencies": { "@game/shared": "*", "openai": "7.43.0" },
+  "devDependencies": { "@types/node": "^22.0.0", "tsx": "^4.20.0", "typescript": "5.9.3" }
+}

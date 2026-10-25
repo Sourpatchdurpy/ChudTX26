@@ -1,0 +1,29 @@
+{
+  "name": "@game/server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "bots": "tsx scripts/bots.ts",
+    "ai:lab": "tsx scripts/ai-lab.ts",
+    "test": "tsx --test \"src/**/*.test.ts\"",
+    "check:privacy": "tsx scripts/check-privacy.ts",
+    "smoke": "tsx scripts/smoke.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@game/ai": "*",
+    "@game/shared": "*",
+    "socket.io": "4.8.4",
+    "zod": "^4.6.7",
+    "nanoid": "^6.0.2",
+    "openai": "^7.43.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "@types/node": "^24",
+    "socket.io-client": "4.8.4"
+  }
+}

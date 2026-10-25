@@ -1,8 +1,17 @@
 # ChudTX26
 HackTX26 repository for Nathan Tan, Gengwen Li, Sanjey Manian, and Bradley Ngyuen
 
-Run `npm install` and `npm run dev` to open the frontend.
-Run `npm run build` to check TypeScript and create a production build.
+Run `npm install` and `npm run dev` to start the root Vite frontend at
+`http://127.0.0.1:3000` and the game server at `http://localhost:4000`.
+Use `npm run dev:web` or `npm run dev:server` to start either separately.
+The frontend lives in `src/`; there is no `apps/web` workspace.
+Run `npm run build` to check frontend/workspace TypeScript and create the Vite
+production build in `dist/`. `npm run build:web` is an alias for that build.
+Run `npm run test:ai` and `npm run test:server` for mocked AI and server tests.
+
+For offline development, set `AI_MODE=stub` in the root `.env` (see `.env.example`).
+Starting the two services together does not connect the frontend's localStorage
+room flow to Socket.IO; that integration remains separate, as described below.
 
 The arcade entry screen generates a codename and defaults to Join Room.
 Hosts register a four-character uppercase alphanumeric code by creating a lobby;
