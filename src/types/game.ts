@@ -1,5 +1,7 @@
 export interface EntryIdentity {
-  nickname: string;
+  /** Real first name: only revealed to the group at the end of the game. */
+  realName: string;
+  /** Join only; hosts get a code from the server. */
   roomCode: string;
   isHost: boolean;
 }
@@ -8,6 +10,8 @@ export interface EntryScreenProps {
   onEnter: (identity: EntryIdentity) => void | Promise<void>;
   isDarkMode: boolean;
   onToggleTheme: () => void;
+  /** E.g. why the previous room closed. */
+  initialError?: string;
 }
 
 export interface Player {
@@ -20,19 +24,6 @@ export interface LobbyPlayer {
   nickname: string;
   isHost: boolean;
   avatarSeed?: string;
-}
-
-export interface LocalRoom {
-  roomCode: string;
-  hostId: string;
-  players: LobbyPlayer[];
-  discussionStartedAt?: number;
-  messages?: DiscussionMsg[];
-  roundNumber?: number;
-  roundParticipants?: LobbyPlayer[];
-  votes?: Record<string, string>;
-  roundResult?: RoundVoteResult | null;
-  voteResolvedAt?: number;
 }
 
 export interface LobbyWaitingRoomProps {
@@ -126,5 +117,8 @@ export interface GameOverRevealProps {
   mostSusHuman: string;
   aiConfessionalNotes: string[];
   talkToMission: TalkToMission;
-  onPlayAgain: () => void;
+  /** Omit to show `waitingText` instead of the button (e.g. non-hosts). */
+  onPlayAgain?: () => void;
+  playAgainLabel?: string;
+  waitingText?: string;
 }

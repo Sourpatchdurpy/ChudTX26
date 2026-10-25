@@ -103,7 +103,7 @@ export default function LobbyWaitingRoom({ isDarkMode, onToggleTheme, roomCode, 
             <motion.span aria-hidden="true" initial={false} animate={reduceMotion ? { opacity: 1 } : { opacity: [0.3, 1, 0.3], scale: [0.85, 1, 0.85] }} transition={{ duration: 1.5, repeat: Infinity }} className={`mt-1 h-2 w-2 shrink-0 ${isDarkMode ? 'bg-[#00E5FF] shadow-[0_0_8px_#00E5FF]' : 'bg-[#16223B]'}`} />
             <p className={`font-pixel text-[8px] leading-loose sm:text-[9px] ${accent}`}>SETUP AGENT CALIBRATING...<br />WAITING FOR HOST TO LAUNCH...</p>
           </div>}
-          <p className={`text-center text-xs leading-relaxed ${muted}`}>3–6 players · 3 rounds · 50-second discussions</p>
+          <p className={`text-center text-xs leading-relaxed ${muted}`}>3–6 players · 3 rounds · one player is secretly an AI</p>
           <button type="button" onClick={onLeaveRoom} className={`flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border px-4 py-2 text-xs transition-colors hover:bg-white/10 ${border} ${muted} ${focusClass}`}><ArrowLeft size={15} aria-hidden="true" />Leave room</button>
         </div>
       </section>

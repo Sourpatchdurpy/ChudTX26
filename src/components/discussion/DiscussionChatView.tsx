@@ -101,7 +101,6 @@ export default function DiscussionChatView({
       if (now >= pending.releaseAt) {
         pendingRef.current = null;
         setHolding(false);
-        callbacksRef.current.onSendMessage?.(pending.text);
       }
     };
     const timer = setInterval(tick, 100);
@@ -121,7 +120,10 @@ export default function DiscussionChatView({
 
   function send() {
     if (!callbacksRef.current.onSendMessage || pendingRef.current || endedRef.current || deadlineRef.current === null || Date.now() >= deadlineRef.current || !inputText.trim() || charCount > CHARACTER_LIMIT) return;
-    pendingRef.current = { text: inputText.trim(), releaseAt: Date.now() + HOLD_SECONDS * 1000 };
+    const text = inputText.trim();
+    // Sent right away: the server holds every message for 5s, and the badge mirrors that hold.
+    pendingRef.current = { text, releaseAt: Date.now() + HOLD_SECONDS * 1000 };
+    callbacksRef.current.onSendMessage(text);
     setHolding(true);
     setHoldSeconds(HOLD_SECONDS);
     setInputText('');

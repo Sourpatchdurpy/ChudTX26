@@ -1,282 +1,163 @@
-import { useEffect, useState } from 'react';
+// Renders purely from the server's latest RoomView (MASTER_PLAN §5): the server
+// owns phases, timers and rules; this file maps each phase to a screen.
+import { useState } from 'react';
+import { FastForward, WifiOff } from 'lucide-react';
+import type { PlayerId, RoomView } from '@game/shared';
 import EntryScreen from './components/auth/EntryScreen';
 import LobbyWaitingRoom from './components/lobby/LobbyWaitingRoom';
-import PixelSky from './components/shared/PixelSky';
 import MobilePreview from './components/shared/MobilePreview';
 import DiscussionChatView from './components/discussion/DiscussionChatView';
 import PrivateAnswerView from './components/game/PrivateAnswerView';
 import RoundVoteModal from './components/discussion/RoundVoteModal';
 import GameOverReveal from './components/game/GameOverReveal';
-import type { DiscussionMsg, EntryIdentity, LobbyPlayer, RoundVoteResult } from '@/types/game';
-import { generateCodename, generateRoomCode } from './lib/entryIdentity';
-import { advanceLocalRound, castLocalVote, enterLocalRoom, leaveLocalRoom, LOCAL_ROOMS_CHANGED, readLocalRoom, resetLocalLobby, resolveLocalVote, sendLocalMessage, startLocalDiscussion } from './lib/localRooms';
+import { PairChatView, PairResultsView, PartnerCardView, VoteResultsView, VouchBoard, type PairSummary, type Who } from './components/game/GameScreens';
+import type { DiscussionMsg, EntryIdentity, LobbyPlayer, TalkToMission } from '@/types/game';
+import { useGame, useSecondsLeft } from './lib/gameClient';
+
+const TIER_LABEL = { light: 'LIGHT', personal: 'PERSONAL', collab: 'DEEP' } as const;
 
 export default function App() {
   const [isDarkMode, setIsDarkMode] = useState(true);
-  const [currentUserId] = useState(() => crypto.randomUUID());
-  const [identity, setIdentity] = useState<EntryIdentity | null>(() =>
-    ['lobby', 'chat', 'answer', 'vote', 'reveal'].includes(new URLSearchParams(window.location.search).get('preview') ?? '')
-      ? { nickname: generateCodename(), roomCode: generateRoomCode(), isHost: true }
-      : null,
-  );
-  const [phase, setPhase] = useState<'lobby' | 'answer' | 'chat' | 'voting' | 'complete'>(() =>
-    new URLSearchParams(window.location.search).get('preview') === 'reveal' ? 'complete' :
-    new URLSearchParams(window.location.search).get('preview') === 'vote' ? 'voting' :
-    new URLSearchParams(window.location.search).get('preview') === 'answer' ? 'answer' :
-      new URLSearchParams(window.location.search).get('preview') === 'chat' ? 'chat' : 'lobby',
-  );
-  const [messages, setMessages] = useState<DiscussionMsg[]>([]);
-  const [previewAnswer, setPreviewAnswer] = useState<string | null>(null);
-  const [session, setSession] = useState(0);
-  const [voteSeconds, setVoteSeconds] = useState(20);
-  const [joinedRoomCode, setJoinedRoomCode] = useState<string | null>(null);
-  const [discussionStartedAt, setDiscussionStartedAt] = useState<number | null>(null);
-  const [roomError, setRoomError] = useState('');
-  const [roundNumber, setRoundNumber] = useState(1);
-  const [roundParticipants, setRoundParticipants] = useState<LobbyPlayer[]>([]);
-  const [roundResult, setRoundResult] = useState<RoundVoteResult | null>(null);
-  const [voteResolvedAt, setVoteResolvedAt] = useState<number | null>(null);
-  const [gameWon, setGameWon] = useState(() => new URLSearchParams(window.location.search).get('preview') === 'reveal' && new URLSearchParams(window.location.search).get('win') === 'humans');
-  const [roomPlayers, setRoomPlayers] = useState<LobbyPlayer[]>(() => identity
-    ? [{ id: currentUserId, nickname: identity.nickname, isHost: identity.isHost }]
-    : []);
-  const canvas = isDarkMode ? 'bg-[#060B28] text-white' : 'bg-gradient-to-b from-[#FFAE70] via-[#FFD199] to-[#86C5DA] text-[#0E1726]';
-  const glass = isDarkMode ? 'border-[#00E5FF] bg-black/20 shadow-[0_0_25px_#00E5FF50]' : 'border-[#16223B]/80 bg-white/20 shadow-[0_0_25px_#FFAE7099]';
-  const muted = isDarkMode ? 'text-[#B5DFFF]' : 'text-[#26374F]';
-  const accent = isDarkMode ? 'text-[#00E5FF]' : 'text-[#0E1726]';
+  const [error, setError] = useState('');
+  const game = useGame();
+  const { view } = game;
+  const seconds = useSecondsLeft(view?.phaseEndsAt ?? null, game.clockOffset);
+  const theme = { isDarkMode, onToggleTheme: () => setIsDarkMode(value => !value) };
 
-  useEffect(() => {
-    if (!joinedRoomCode) return;
-    const syncRoom = () => {
-      try {
-        const room = readLocalRoom(joinedRoomCode);
-        if (room && room.players.some(player => player.id === currentUserId)) {
-          setRoomPlayers(room.players);
-          setMessages(room.messages ?? []);
-          setDiscussionStartedAt(room.discussionStartedAt ?? null);
-          setRoundNumber(room.roundNumber ?? 1);
-          setRoundParticipants(room.roundParticipants ?? room.players);
-          setRoundResult(room.roundResult ?? null);
-          setVoteResolvedAt(room.voteResolvedAt ?? null);
-          setPhase(room.discussionStartedAt === undefined ? 'lobby' : room.roundResult && !room.roundResult.isTie && room.roundResult.wasAi ? 'complete' : room.roundResult && (room.roundNumber ?? 1) >= 3 && room.voteResolvedAt !== undefined && Date.now() >= room.voteResolvedAt + 3000 ? 'complete' : Date.now() < room.discussionStartedAt + 50000 ? 'chat' : 'voting');
-          setGameWon(!!room.roundResult && !room.roundResult.isTie && room.roundResult.wasAi);
-        } else {
-          setRoomPlayers([]);
-          setIdentity(null);
-          setJoinedRoomCode(null);
-          setDiscussionStartedAt(null);
-          setPhase('lobby');
-        }
-      } catch { setRoomError('Unable to sync the room. Please try again.'); }
-    };
-    window.addEventListener('storage', syncRoom);
-    window.addEventListener(LOCAL_ROOMS_CHANGED, syncRoom);
-    window.addEventListener('focus', syncRoom);
-    document.addEventListener('visibilitychange', syncRoom);
-    syncRoom();
-    return () => {
-      window.removeEventListener('storage', syncRoom);
-      window.removeEventListener(LOCAL_ROOMS_CHANGED, syncRoom);
-      window.removeEventListener('focus', syncRoom);
-      document.removeEventListener('visibilitychange', syncRoom);
-    };
-  }, [joinedRoomCode, currentUserId]);
-
-  useEffect(() => {
-    if (!joinedRoomCode || discussionStartedAt === null) return;
-    let resolving = false;
-    let advancing = false;
-    const tick = () => {
-      const endsAt = discussionStartedAt + 50000;
-      if (roundResult) {
-        setVoteSeconds(0);
-        if (roundResult.wasAi && !roundResult.isTie) { onAiEliminated(); return; }
-        if (voteResolvedAt !== null && Date.now() >= voteResolvedAt + 3000) {
-          if (roundNumber >= 3) setPhase('complete');
-          else if (!advancing) {
-            advancing = true;
-            void advanceLocalRound(joinedRoomCode, currentUserId, discussionStartedAt).catch(error => setRoomError(error instanceof Error ? error.message : 'Unable to advance the round.'));
-          }
-        } else setPhase('voting');
-        return;
-      }
-      if (Date.now() >= endsAt) {
-        const seconds = Math.max(0, Math.ceil((endsAt + 20000 - Date.now()) / 1000));
-        setVoteSeconds(seconds);
-        setPhase('voting');
-        if (seconds === 0 && !resolving) {
-          resolving = true;
-          void resolveLocalVote(joinedRoomCode, currentUserId, discussionStartedAt).catch(error => setRoomError(error instanceof Error ? error.message : 'Unable to resolve the vote.'));
-        }
-      } else setPhase('chat');
-    };
-    tick();
-    const timer = setInterval(tick, 100);
-    return () => clearInterval(timer);
-  }, [joinedRoomCode, discussionStartedAt, roundResult, voteResolvedAt, roundNumber, currentUserId]);
-
-  useEffect(() => {
-    if (phase !== 'voting' || joinedRoomCode || roundResult) return;
-    const deadline = Date.now() + 20000;
-    const interval = setInterval(() => {
-      const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
-      setVoteSeconds(remaining);
-      if (remaining === 0) {
-        clearInterval(interval);
-        setRoundResult({ eliminatedNickname: null, wasAi: false, isTie: true });
-        setVoteResolvedAt(Date.now());
-      }
-    }, 100);
-    return () => clearInterval(interval);
-  }, [phase, joinedRoomCode, roundResult]);
-
-  useEffect(() => {
-    if (joinedRoomCode || phase !== 'voting' || !roundResult) return;
-    if (roundResult.wasAi && !roundResult.isTie) { onAiEliminated(); return; }
-    const timer = setTimeout(() => {
-      if (roundNumber >= 3) setPhase('complete');
-      else { setRoundNumber(value => value + 1); openChatPreview(); }
-    }, Math.max(0, (voteResolvedAt ?? Date.now()) + 3000 - Date.now()));
-    return () => clearTimeout(timer);
-  }, [joinedRoomCode, phase, roundResult, roundNumber, voteResolvedAt]);
-
-  function onAiEliminated() { setGameWon(true); setPhase('complete'); }
-
-  async function enterRoom(entry: EntryIdentity) {
-    const room = await enterLocalRoom(entry, currentUserId);
-    setRoomPlayers(room.players);
-    setJoinedRoomCode(room.roomCode);
-    setIdentity(entry);
-    setRoomError('');
-    setRoundResult(null);
-    setVoteResolvedAt(null);
-    setGameWon(false);
-    setPhase('lobby');
-  }
-
-  function leaveRoom() {
-    if (joinedRoomCode) void leaveLocalRoom(joinedRoomCode, currentUserId).catch(() => undefined);
-    setJoinedRoomCode(null);
-    setDiscussionStartedAt(null);
-    setRoomPlayers([]);
-    setIdentity(null);
-    setMessages([]);
-    setPhase('lobby');
-    setRoundResult(null);
-    setVoteResolvedAt(null);
-    setGameWon(false);
-    setRoomError('');
-  }
-
-  function openChatPreview() {
-    setSession(value => value + 1);
-    setMessages([]);
-    setRoundResult(null);
-    setVoteResolvedAt(null);
-    setVoteSeconds(20);
-    setPhase('chat');
-  }
-
-  async function launchGame() {
-    if (!joinedRoomCode) { openChatPreview(); return; }
-    try {
-      setRoomError('');
-      await startLocalDiscussion(joinedRoomCode, currentUserId);
-    } catch (error) { setRoomError(error instanceof Error ? error.message : 'Unable to launch. Please try again.'); }
-  }
-
-  function publishMessage(text: string) {
-    if (joinedRoomCode) {
-      void sendLocalMessage(joinedRoomCode, currentUserId, text).catch(error => setRoomError(error instanceof Error ? error.message : 'Unable to send your message.'));
-    } else if (identity) setMessages(previous => [...previous, { id: crypto.randomUUID(), senderNickname: identity.nickname, text, timestamp: Date.now() }]);
-  }
-
-  async function returnToLobby() {
-    if (!joinedRoomCode) { setRoundNumber(1); setRoundResult(null); setGameWon(false); setPhase('lobby'); return; }
-    try { await resetLocalLobby(joinedRoomCode, currentUserId); }
-    catch (error) { setRoomError(error instanceof Error ? error.message : 'Unable to reopen the lobby.'); }
-  }
-
-  const errorNotice = roomError && <div role="alert" className="fixed bottom-4 left-4 right-4 z-50 mx-auto flex max-w-lg items-center justify-between gap-3 rounded-xl border border-[#FF5376] bg-[#060B28] p-3 font-sans text-sm text-white"><p>{roomError}</p><button type="button" onClick={() => setRoomError('')} className="min-h-11 px-2 font-bold">Dismiss</button></div>;
+  /** Runs a server action; any rejection becomes the error banner. */
+  const run = (action: () => Promise<unknown>) => { setError(''); return action().catch((e: unknown) => { setError(e instanceof Error ? e.message : 'Something went wrong.'); throw e; }); };
+  const fire = (action: () => Promise<unknown>) => { void run(action).catch(() => undefined); };
 
   if (new URLSearchParams(window.location.search).get('device') === 'mobile') return <MobilePreview />;
-  if (!identity) return <EntryScreen onEnter={enterRoom} isDarkMode={isDarkMode} onToggleTheme={() => setIsDarkMode(value => !value)} />;
 
-  if (phase === 'answer') return <PrivateAnswerView
-    isDarkMode={isDarkMode}
-    onToggleTheme={() => setIsDarkMode(value => !value)}
-    roundNumber={roundNumber}
-    roundTier={(['LIGHT', 'PERSONAL', 'DEEP'] as const)[Math.min(2, roundNumber - 1)]}
-    question=""
-    totalPlayers={roomPlayers.length}
-    answeredCount={previewAnswer === null ? 0 : 1}
-    onSubmitAnswer={setPreviewAnswer}
-    onTimeUp={openChatPreview}
-  />;
+  if (!view || !view.me) {
+    return <EntryScreen key={game.closedReason} {...theme} initialError={game.closedReason} onEnter={async (entry: EntryIdentity) => {
+      game.dismissClosed();
+      if (entry.isHost) await game.create(entry.realName);
+      else await game.join(entry.roomCode, entry.realName);
+    }} />;
+  }
 
-  if (phase === 'chat' || phase === 'voting') return <>
-    <div aria-hidden={phase === 'voting' ? true : undefined} ref={node => { node?.toggleAttribute('inert', phase === 'voting'); }}>
-      <DiscussionChatView
-        key={discussionStartedAt ?? session}
-        isDarkMode={isDarkMode}
-        onToggleTheme={() => setIsDarkMode(value => !value)}
-        question=""
-        answers={joinedRoomCode === null && previewAnswer !== null ? [{ id: currentUserId, authorNickname: identity.nickname, text: previewAnswer }] : []}
-        messages={messages}
-        currentUserNickname={identity.nickname}
-        initialSeconds={phase === 'voting' ? 0 : discussionStartedAt === null ? 50 : Math.max(0, 50 - (Date.now() - discussionStartedAt) / 1000)}
-        onSendMessage={publishMessage}
-        onDiscussionEnd={() => {
-          if (phase !== 'chat') return;
-          setVoteSeconds(discussionStartedAt === null ? 20 : Math.max(0, Math.ceil((discussionStartedAt + 70000 - Date.now()) / 1000)));
-          setPhase('voting');
-        }}
-      />
-    </div>
-    {phase === 'voting' && <RoundVoteModal
-      key={discussionStartedAt ?? session}
-      isDarkMode={isDarkMode}
-      secondsRemaining={voteSeconds}
-      candidates={(roundParticipants.length ? roundParticipants : roomPlayers).filter(player => player.id !== currentUserId).map(player => ({ nickname: player.nickname, answerSnippet: '' }))}
-      onCastVote={async nickname => {
-        if (joinedRoomCode && discussionStartedAt !== null) await castLocalVote(joinedRoomCode, currentUserId, nickname, discussionStartedAt);
-      }}
-      roundResult={roundResult}
-    />}
-    {errorNotice}
-  </>;
+  const me = view.me;
+  const who = (id: PlayerId): Who => {
+    const p = view.players.find(player => player.id === id);
+    return { id, label: p ? `${p.emoji} ${p.nickname}` : '???' };
+  };
+  const myLabel = who(me.id).label;
+  const idByLabel = (label: string) => view.players.find(p => `${p.emoji} ${p.nickname}` === label)?.id;
+  const currentRecord = view.history[view.history.length - 1];
+  const myPair = view.pairs?.find(pair => pair.members.includes(me.id)) ?? null;
+  const partnerIds = myPair?.members.filter(id => id !== me.id) ?? [];
+  const pairSummaries = (): PairSummary[] => (view.pairs ?? []).map(pair => ({
+    id: pair.id,
+    mine: pair.id === myPair?.id,
+    members: pair.members.map(id => ({ who: who(id), result: view.collabResults?.[id] ?? null })),
+  }));
 
-  if (phase === 'complete' && (gameWon || new URLSearchParams(window.location.search).get('preview') === 'reveal')) return <><GameOverReveal
-    isDarkMode={isDarkMode}
-    onToggleTheme={() => setIsDarkMode(value => !value)}
-    didHumansWin={gameWon}
-    aiNickname={gameWon && roundResult?.wasAi ? roundResult.eliminatedNickname ?? '' : ''}
-    players={roomPlayers.map(player => ({ nickname: player.nickname, realName: '', isAi: !!gameWon && !!roundResult?.wasAi && player.nickname === roundResult.eliminatedNickname, totalVotesReceived: 0 }))}
-    mostSusHuman=""
-    aiConfessionalNotes={[]}
-    talkToMission={{ partnerRealName: '', partnerNickname: '', sharedMoment: '', openingLine: '' }}
-    onPlayAgain={() => { if (joinedRoomCode && !identity.isHost) leaveRoom(); else void returnToLobby(); }}
-  />{errorNotice}</>;
+  const errorNotice = error && <div role="alert" className="fixed bottom-4 left-4 right-4 z-50 mx-auto flex max-w-lg items-center justify-between gap-3 rounded-xl border border-[#FF5376] bg-[#060B28] p-3 font-sans text-sm text-white"><p>{error}</p><button type="button" onClick={() => setError('')} className="min-h-11 px-2 font-bold">Dismiss</button></div>;
+  const offline = !game.connected && <div role="status" className="fixed left-1/2 top-3 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full border border-[#FF5376] bg-[#060B28] px-3 py-1.5 font-sans text-xs text-white"><WifiOff size={13} aria-hidden="true" />Reconnecting…</div>;
+  // Host only, timed phases: end the phase now (for demos and judging).
+  const skip = me.isHost && view.phaseEndsAt !== null && <button type="button" onClick={() => fire(game.advance)} className="fixed bottom-4 right-4 z-[45] flex min-h-11 items-center gap-2 rounded-xl border-2 border-[#00E5FF]/70 bg-[#060B28]/90 px-3 font-pixel text-[8px] text-[#00E5FF] shadow-[3px_3px_0_#000]"><FastForward size={14} aria-hidden="true" />SKIP</button>;
+  const overlays = <>{offline}{skip}{errorNotice}</>;
+  const screen = (node: React.ReactNode) => <>{node}{overlays}</>;
 
-  if (phase === 'complete') return <main className={`relative isolate flex min-h-[100dvh] items-center justify-center overflow-hidden px-4 py-8 font-sans ${canvas}`}>
-    <PixelSky isDarkMode={isDarkMode} />
-    <section className={`relative z-10 flex w-full max-w-lg flex-col gap-5 rounded-2xl border-2 p-5 backdrop-blur-xs sm:p-7 ${glass}`}>
-      <h1 className={`break-words font-pixel text-sm leading-loose ${gameWon ? (isDarkMode ? 'text-[#38EF7D]' : 'text-[#126438]') : accent}`}>{gameWon ? '[ IMPOSTER DETECTED // PROTOCOL BREACHED ]' : '[ 3 ROUNDS COMPLETE ]'}</h1>
-      <p className={`text-sm ${muted}`}>{gameWon ? 'The AI has been found. Humans win.' : 'The round results are complete. Everyone stays in the room.'}</p>
-      {(!joinedRoomCode || identity.isHost) ? <button type="button" onClick={returnToLobby} className="min-h-14 rounded-xl border-b-4 border-[#B31D3F] bg-[#FF5376] px-4 py-3 font-bold text-white hover:bg-[#FF3360]">{joinedRoomCode ? 'Return everyone to lobby' : 'Back to lobby'}</button> : <p className={`text-sm ${muted}`}>Waiting for the host to reopen the lobby.</p>}
-      {joinedRoomCode && <button type="button" onClick={leaveRoom} className={`min-h-11 text-sm ${muted}`}>Leave room</button>}
-    </section>
-    {errorNotice}
-  </main>;
+  switch (view.phase) {
+    case 'lobby': {
+      const names = view.lobby?.realNames ?? [];
+      const myIndex = names.indexOf(me.realName);
+      const players: LobbyPlayer[] = names.map((name, i) => ({ id: `${i}:${name}`, nickname: name, isHost: i === myIndex && me.isHost }));
+      return screen(<LobbyWaitingRoom {...theme} roomCode={view.code} players={players} currentUserId={`${myIndex}:${me.realName}`} isHost={me.isHost}
+        onStartGame={() => fire(game.start)} onLeaveRoom={game.leave} />);
+    }
 
-  return <><LobbyWaitingRoom
-    isDarkMode={isDarkMode}
-    onToggleTheme={() => setIsDarkMode(value => !value)}
-    roomCode={identity.roomCode}
-    players={roomPlayers}
-    currentUserId={currentUserId}
-    isHost={identity.isHost}
-    onStartGame={launchGame}
-    onLeaveRoom={leaveRoom}
-  />{errorNotice}</>;
+    case 'answer':
+      return screen(<PrivateAnswerView key={`answer-${view.round?.number}`} {...theme}
+        roundNumber={view.round?.number ?? 1} roundTier={TIER_LABEL[view.round?.tier ?? 'light']} question={view.round?.prompt ?? ''}
+        totalPlayers={view.answerProgress?.total ?? view.players.length} answeredCount={view.answerProgress?.answered ?? 0}
+        initialSeconds={seconds} onSubmitAnswer={text => fire(() => game.answer(text))} onTimeUp={() => undefined} />);
+
+    case 'discuss':
+    case 'vote': {
+      const answers = (currentRecord?.answers ?? []).map(a => ({ id: a.playerId, authorNickname: who(a.playerId).label, text: a.text ?? '(no answer)' }));
+      const messages: DiscussionMsg[] = view.messages.filter(m => m.channel === 'group').map(m => ({ id: m.id, senderNickname: who(m.from).label, text: m.text, timestamp: m.at }));
+      return screen(<>
+        <div aria-hidden={view.phase === 'vote' || undefined} ref={node => { node?.toggleAttribute('inert', view.phase === 'vote'); }}>
+          <DiscussionChatView key={`discuss-${view.round?.number}`} {...theme} question={view.round?.prompt ?? ''} answers={answers} messages={messages}
+            currentUserNickname={myLabel} initialSeconds={view.phase === 'discuss' ? seconds : 0}
+            onSendMessage={view.phase === 'discuss' ? text => fire(() => game.chat(text, 'group')) : undefined} onDiscussionEnd={() => undefined} />
+        </div>
+        {view.phase === 'vote' && <RoundVoteModal key={`vote-${view.round?.number}`} isDarkMode={isDarkMode} secondsRemaining={seconds}
+          candidates={view.players.filter(p => p.id !== me.id).map(p => ({ nickname: who(p.id).label, answerSnippet: answers.find(a => a.id === p.id)?.text ?? '' }))}
+          onCastVote={label => run(() => game.vote(idByLabel(label) ?? ''))} />}
+      </>);
+    }
+
+    case 'voteResult': {
+      const counts = view.players.map(p => ({ who: who(p.id), votes: view.lastVoteCounts?.[p.id] ?? 0 }));
+      return screen(<VoteResultsView {...theme} round={view.round?.number ?? 1} seconds={seconds} counts={counts} me={me.id} />);
+    }
+
+    case 'pairChat': {
+      const messages = view.messages.filter(m => m.channel === 'pair' && m.pairId === myPair?.id)
+        .map(m => ({ id: m.id, from: who(m.from), text: m.text, mine: m.from === me.id }));
+      return screen(<PairChatView {...theme} seconds={seconds} card={view.round?.prompt ?? ''} submitPrompt={view.round?.submitPrompt ?? 'Your result'}
+        partners={partnerIds.map(who)} messages={messages} myResult={me.myCollabResult}
+        onSend={text => run(() => game.chat(text, 'pair'))} onSubmitResult={text => run(() => game.collab(text))} />);
+    }
+
+    case 'pairResults':
+      return screen(<PairResultsView {...theme} seconds={seconds} pairs={pairSummaries()} me={me.id} myVouches={me.myVouches}
+        onVouch={(targetId, vouched) => run(() => game.vouch(targetId, vouched))} />);
+
+    case 'finalVote': {
+      const vouches = (view.vouches ?? []).map(v => ({ from: who(v.from), target: who(v.target), vouched: v.vouched }));
+      return screen(<>
+        <div aria-hidden ref={node => { node?.toggleAttribute('inert', true); }}><VouchBoard {...theme} pairs={pairSummaries()} vouches={vouches} /></div>
+        <RoundVoteModal key="final-vote" isDarkMode={isDarkMode} secondsRemaining={seconds}
+          candidates={view.players.filter(p => p.id !== me.id).map(p => ({ nickname: who(p.id).label, answerSnippet: view.collabResults?.[p.id] ? `Result: “${view.collabResults[p.id]}”` : '' }))}
+          onCastVote={label => run(() => game.vote(idByLabel(label) ?? ''))} />
+      </>);
+    }
+
+    case 'reveal':
+      return screen(<RevealScreen view={view} who={who} theme={theme} partnerIds={partnerIds}
+        onNext={me.isHost ? () => fire(game.advance) : undefined} />);
+
+    case 'partners': {
+      const card = me.partnerCard;
+      return screen(<PartnerCardView {...theme} onPlayAgain={me.isHost ? () => fire(game.playAgain) : undefined} card={card && {
+        kind: card.kind,
+        partners: card.partners.map(p => ({ label: who(p.playerId).label, realName: p.realName, result: p.collabResult })),
+        myResult: card.myCollabResult,
+        aiWasInMyPair: card.aiWasInMyPair,
+        suggestion: card.suggestion && { realName: card.suggestion.realName, reason: card.suggestion.reason },
+      }} />);
+    }
+  }
+}
+
+function RevealScreen({ view, who, theme, partnerIds, onNext }: {
+  view: RoomView; who: (id: PlayerId) => Who; theme: { isDarkMode: boolean; onToggleTheme: () => void }; partnerIds: PlayerId[]; onNext?: () => void;
+}) {
+  const reveal = view.reveal;
+  if (!reveal) return null;
+  // Votes received across all three votes (rounds 1–2 history + the final vote).
+  const totalVotes = (id: PlayerId) => view.history.reduce((sum, r) => sum + (r.voteCounts?.[id] ?? 0), 0) + (reveal.finalVoteCounts[id] ?? 0);
+  const humanPartner = partnerIds.find(id => id !== reveal.aiPlayerId && reveal.realNames[id]);
+  const talkToMission: TalkToMission = humanPartner
+    ? {
+        partnerRealName: reveal.realNames[humanPartner]!,
+        partnerNickname: who(humanPartner).label,
+        sharedMoment: view.collabResults?.[humanPartner] ? `Their round 3 answer: “${view.collabResults[humanPartner]}”` : '',
+        openingLine: `Hey ${reveal.realNames[humanPartner]}, I was ${who(view.me!.id).label} in the game!`,
+      }
+    : { partnerRealName: '', partnerNickname: '', sharedMoment: 'Your partner was the AI. Your partner card (next) suggests who to talk to.', openingLine: '' };
+  return <GameOverReveal {...theme}
+    didHumansWin={reveal.humansWon}
+    aiNickname={`${who(reveal.aiPlayerId).label}${reveal.aiPersona.blurb ? ` · ${reveal.aiPersona.blurb}` : ''}`}
+    players={view.players.map(p => ({ nickname: who(p.id).label, realName: reveal.realNames[p.id] ?? '', isAi: p.id === reveal.aiPlayerId, totalVotesReceived: totalVotes(p.id) }))}
+    mostSusHuman={reveal.mostSuspiciousHuman ? who(reveal.mostSuspiciousHuman.playerId).label : ''}
+    aiConfessionalNotes={reveal.aiNotes.map(n => n.text)}
+    talkToMission={talkToMission}
+    onPlayAgain={onNext} playAgainLabel="SHOW PARTNER CARDS" waitingText="Waiting for the host to show partner cards…" />;
 }
