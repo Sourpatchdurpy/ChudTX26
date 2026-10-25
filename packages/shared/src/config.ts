@@ -9,12 +9,12 @@ import type { Phase } from "./types";
 export const DEFAULT_TIMERS: Record<Phase, number | null> = {
   lobby: null,
   answer: 30_000,
-  discuss: 45_000,
-  vote: 12_000,
+  discuss: 90_000, // doubled after playtesting (was 45s)
+  vote: 24_000, // doubled after playtesting (was 12s)
   voteResult: 6_000,
   pairChat: 90_000,
   pairResults: 20_000,
-  finalVote: 15_000,
+  finalVote: 30_000, // doubled after playtesting (was 15s)
   reveal: null,
   partners: null,
 };
