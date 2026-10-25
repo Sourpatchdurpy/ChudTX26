@@ -1,0 +1,490 @@
+// Controller tests: fake game server, fake Part 2, fake Muse, mocked timers.
+// No real Muse calls are possible here: the controller only calls deps.call.
+import { afterEach, beforeEach, describe, mock, test } from "node:test";
+import assert from "node:assert/strict";
+import { CHAT_DELAY_MS, LIMITS } from "@game/shared";
+import type {
+  AiActions, Channel, ChatMessage, CurrentRound, MuseChatRequest, Persona, Phase,
+  PlayerId, RoomView, RoundNumber, RoundRecord, Tier,
+} from "@game/shared";
+import type { MuseCallFn, MuseCallOptions } from "../muse.js";
+import { AiController } from "./AiController.js";
+import { classifyMessage, mentionsNickname, quotesAnswer, replyProbability } from "./cadence.js";
+import { chooseFinalVote, chooseSuspicionVote } from "./decisions.js";
+import type { HumannessDeps } from "./deps.js";
+import { selectRevealNotes, type NoteRecord } from "./notes.js";
+
+// ── fixtures ────────────────────────────────────────────────────────────────
+
+const AI = "ai1";
+const PLAYERS = [
+  { id: AI, nickname: "Fox", emoji: "🦊" },
+  { id: "h1", nickname: "Owl", emoji: "🦉" },
+  { id: "h2", nickname: "Panda", emoji: "🐼" },
+  { id: "h3", nickname: "Otter", emoji: "🦦" },
+];
+
+const PERSONA: Persona = {
+  name: "Jordan", age: 20, school: "UT Austin", year: "sophomore", major: "CS", hometown: "Houston",
+  hackathonStory: "came with friends", interests: [], opinions: [], facts: [], thisWeek: [],
+  style: { casing: "lowercase", emojiRate: 0.2, slang: [], punctuation: "minimal" },
+  blurb: "Jordan, sophomore CS from Houston",
+};
+
+const FALLBACKS: HumannessDeps["FALLBACK_LINES"] = {
+  answer: { light: ["tacos no question"], personal: ["boba with my roommate"] },
+  collab: ["we both hate 8ams"],
+  group: ["lol wait what"],
+  accused: ["bro what 💀"],
+  pair: ["ok same honestly"],
+};
+
+function fakeHumanness(overrides: Partial<HumannessDeps> = {}): HumannessDeps {
+  const build = (mode: string) => (): MuseChatRequest => ({ messages: [{ role: "user", content: mode }] });
+  return {
+    buildAnswerRequest: build("answer"),
+    buildGroupChatRequest: build("group"),
+    buildPairChatRequest: build("pair"),
+    buildCollabRequest: build("collab"),
+    computeStyleProfile: () => ({
+      medianChars: 40, lowercaseStartRatio: 0.7, endsWithPeriodRatio: 0.1,
+      emojiPerMessage: 0.2, commonTokens: [], sampleMessages: [],
+    }),
+    humanize: (t) => t.trim(),
+    validateOutput: (t) => (/as an ai/i.test(t) ? { ok: false, reason: "tell" } : { ok: true }),
+    FALLBACK_LINES: FALLBACKS,
+    ...overrides,
+  };
+}
+
+type MuseMode = "ok" | "fail" | "hang" | "invalid";
+interface MuseLog { mode: string; opts: MuseCallOptions }
+
+/** Fake museCall. "hang" settles only when the controller aborts it. */
+function fakeMuse(mode: MuseMode, calls: MuseLog[], delayMs = 1_500): MuseCallFn {
+  const aborted = () => Object.assign(new Error("aborted"), { name: "AbortedError" });
+  return (async (req: MuseChatRequest, opts: MuseCallOptions = {}) => {
+    const kind = req.messages[0]!.content;
+    calls.push({ mode: kind, opts });
+    if (mode === "fail") throw Object.assign(new Error("no key"), { name: "MuseUnavailableError" });
+    await new Promise<void>((resolve, reject) => {
+      opts.signal?.addEventListener("abort", () => reject(aborted()), { once: true });
+      if (mode !== "hang") setTimeout(resolve, delayMs);
+    });
+    const text = mode === "invalid" ? "as an AI I cannot do that" : `${kind} text`;
+    if (kind === "answer") return { answer: text, note: `${kind} note` };
+    if (kind === "collab") return { result: text, note: "collab note" };
+    return { action: "send", message: text, note: `${kind} note` };
+  }) as MuseCallFn;
+}
+
+/** Deterministic PRNG for repeatable "random" behavior. */
+function mulberry32(seed: number): () => number {
+  let a = seed;
+  return () => {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function currentRound(n: RoundNumber, tier: Tier): CurrentRound {
+  return { number: n, tier, promptId: `Q${n}`, prompt: "question?", submitPrompt: tier === "collab" ? "one thing in common" : null };
+}
+
+function record(n: RoundNumber, tier: Tier, voteCounts: Record<PlayerId, number> | null): RoundRecord {
+  return { round: n, tier, promptId: `Q${n}`, prompt: "question?", answers: [], voteCounts };
+}
+
+interface ActionLog { type: string; at: number; args: unknown[] }
+
+class FakeGame {
+  readonly view: RoomView;
+  readonly actions: ActionLog[] = [];
+  readonly ai: AiController;
+  private msgSeq = 0;
+
+  constructor(opts: { muse?: MuseCallFn; random?: () => number; humanness?: HumannessDeps } = {}) {
+    this.view = {
+      code: "TEST", serverNow: Date.now(), phase: "lobby", phaseEndsAt: null,
+      me: {
+        id: AI, realName: "", nickname: "Fox", emoji: "🦊", isHost: false, myAnswer: null, myVote: null,
+        myPairId: null, myCollabResult: null, myVouches: {}, partnerCard: null,
+      },
+      lobby: null, players: PLAYERS, round: null, history: [], answerProgress: null, messages: [],
+      voteProgress: null, lastVoteCounts: null, pairs: null, collabResults: null, vouches: null, reveal: null,
+    };
+    const log = (type: string, ...args: unknown[]) => this.actions.push({ type, at: Date.now(), args });
+    const actions: AiActions = {
+      submitAnswer: (text) => (log("answer", text), { ok: true }),
+      sendChat: (text, channel) => {
+        log("chat", text, channel);
+        const msg = this.message(AI, text, channel, Date.now() + CHAT_DELAY_MS);
+        setTimeout(() => this.deliver(msg), CHAT_DELAY_MS);
+        return { ok: true, messageId: msg.id, visibleAt: msg.at };
+      },
+      castVote: (targetId) => (log("vote", targetId), { ok: true }),
+      submitCollab: (text) => (log("collab", text), { ok: true }),
+      setVouch: (targetId, vouched) => (log("vouch", targetId, vouched), { ok: true }),
+    };
+    this.ai = new AiController(
+      { roomCode: "TEST", aiPlayerId: AI, persona: PERSONA, actions },
+      { humanness: opts.humanness ?? fakeHumanness(), call: opts.muse ?? fakeMuse("ok", []), random: opts.random },
+    );
+  }
+
+  snapshot(): RoomView {
+    return { ...this.view, serverNow: Date.now(), messages: [...this.view.messages] };
+  }
+
+  enter(phase: Phase, round: RoundNumber | null, durationMs: number | null, patch: Partial<RoomView> = {}): void {
+    Object.assign(this.view, { phase, phaseEndsAt: durationMs == null ? null : Date.now() + durationMs, ...patch });
+    this.ai.onEvent({ type: "phaseChanged", phase, round }, this.snapshot());
+  }
+
+  update(patch: Partial<RoomView>): void {
+    Object.assign(this.view, patch);
+    this.ai.onEvent({ type: "stateUpdated" }, this.snapshot());
+  }
+
+  private message(from: PlayerId, text: string, channel: Channel, at: number): ChatMessage {
+    return { id: `m${++this.msgSeq}`, channel, pairId: channel === "pair" ? this.view.me!.myPairId : null, from, text, at };
+  }
+
+  deliver(msg: ChatMessage): void {
+    this.view.messages.push(msg);
+    this.ai.onEvent({ type: "messageVisible", message: msg }, this.snapshot());
+  }
+
+  humanSays(from: PlayerId, text: string, channel: Channel = "group"): ChatMessage {
+    const msg = this.message(from, text, channel, Date.now());
+    this.deliver(msg);
+    return msg;
+  }
+
+  of(type: string): ActionLog[] {
+    return this.actions.filter((a) => a.type === type);
+  }
+}
+
+async function flush(): Promise<void> {
+  for (let i = 0; i < 3; i++) await new Promise<void>((r) => setImmediate(r));
+}
+
+/** Advance the mocked clock in small steps, letting promise chains run in between. */
+async function advance(ms: number, step = 100): Promise<void> {
+  for (let t = 0; t < ms; t += step) {
+    mock.timers.tick(Math.min(step, ms - t));
+    await flush();
+  }
+}
+
+const low = () => 0.01; // every roll succeeds, every uniform() sits at its low end
+
+// ── pure helpers ────────────────────────────────────────────────────────────
+
+describe("cadence helpers", () => {
+  test("nickname mentions respect word boundaries", () => {
+    assert.ok(mentionsNickname("fox are you real", "Fox"));
+    assert.ok(mentionsNickname("ok @Fox lol", "Fox"));
+    assert.ok(mentionsNickname("FOX?", "Fox"));
+    assert.ok(mentionsNickname("Bee's answer was wild", "Bee"));
+    assert.ok(!mentionsNickname("foxes are cute", "Fox"));
+    assert.ok(!mentionsNickname("i've been up since 6", "Bee"));
+  });
+
+  test("quoting our answer counts as addressed", () => {
+    const answers = ["breakfast tacos from tacodeli every time"];
+    assert.ok(quotesAnswer("who said tacodeli every time lmao", answers));
+    assert.ok(!quotesAnswer("tacos are good", answers));
+  });
+
+  test("accusations need a mention plus a bot word", () => {
+    assert.deepEqual(classifyMessage("Fox is def the AI", "Fox", []), { addressed: true, accused: true });
+    assert.deepEqual(classifyMessage("fox whats ur major", "Fox", []), { addressed: true, accused: false });
+    assert.deepEqual(classifyMessage("someone here is a bot", "Fox", []), { addressed: false, accused: false });
+  });
+
+  test("reply probability follows the brief's formula and clamps", () => {
+    assert.equal(replyProbability(0, 0), 0.25);
+    assert.ok(Math.abs(replyProbability(2, 0) - 0.55) < 1e-9);
+    assert.equal(replyProbability(5, 0), 0.6);
+    assert.equal(replyProbability(0, 3), 0.05);
+  });
+});
+
+describe("vote decisions", () => {
+  const humans = ["h1", "h2", "h3"];
+  const history = [record(1, "light", { h1: 1, h2: 3, [AI]: 1 }), record(2, "personal", null)];
+
+  test("suspicion vote bandwagons on the most-voted human", () => {
+    assert.deepEqual(chooseSuspicionVote(humans, history, low), { targetId: "h2", reason: "top" });
+  });
+
+  test("round 1 has no votes yet, so it votes randomly", () => {
+    assert.equal(chooseSuspicionVote(humans, [], low)?.reason, "random");
+  });
+
+  test("final vote skips our partner even if they're the top suspect", () => {
+    assert.deepEqual(chooseFinalVote(humans, new Set(["h2"]), history, low), { targetId: "h1", reason: "top" });
+  });
+});
+
+describe("reveal notes", () => {
+  test("at most 6, each ≤120 chars, priority picks first, story order", () => {
+    let seq = 0;
+    const n = (kind: NoteRecord["kind"], round: RoundNumber | null, text: string, accused = false): NoteRecord =>
+      ({ kind, round, text, accused, seq: ++seq });
+    const notes = [
+      n("answer", 1, "said tacos bc 3 people already did"),
+      n("vote", 1, "voted Owl at random"),
+      n("discuss", 1, "short"),
+      n("discuss", 1, "got called the bot and said i'd been up since 6, nobody pushed back", true),
+      n("answer", 2, "x".repeat(300)),
+      n("pairOpener", 3, "opened with the food question"),
+      n("pair", 3, "asked about their major"),
+      n("collab", 3, "said we both hate 8ams"),
+      n("vouch", 3, "vouched for Panda, felt rude not to"),
+      n("finalVote", 3, "final vote on Owl"),
+    ];
+    const out = selectRevealNotes(notes);
+    assert.equal(out.length, 6);
+    assert.ok(out.every((o) => o.text.length <= 120));
+    const texts = out.map((o) => o.text);
+    assert.ok(texts.includes("said tacos bc 3 people already did"));
+    assert.ok(texts.some((t) => t.startsWith("got called the bot")));
+    assert.ok(!texts.includes("short"));
+    assert.ok(texts.includes("final vote on Owl"));
+  });
+});
+
+// ── the controller ──────────────────────────────────────────────────────────
+
+describe("AiController", () => {
+  beforeEach(() => mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 }));
+  afterEach(() => mock.timers.reset());
+
+  test("answer: model answer submitted within 35–85% of the phase, with timeout, signal and room", async () => {
+    const calls: MuseLog[] = [];
+    const game = new FakeGame({ muse: fakeMuse("ok", calls), random: mulberry32(1) });
+    const start = Date.now();
+    game.enter("answer", 1, 30_000, { round: currentRound(1, "light"), answerProgress: { answered: 0, total: 4 } });
+    await advance(30_000);
+    const [answer, ...extra] = game.of("answer");
+    assert.equal(extra.length, 0);
+    assert.equal(answer!.args[0], "answer text");
+    assert.ok(answer!.at - start >= 10_500 && answer!.at - start <= 25_600, `submitted at ${answer!.at - start}ms`);
+    assert.equal(calls.length, 1);
+    assert.ok(calls[0]!.opts.timeoutMs! <= 12_000);
+    assert.ok(calls[0]!.opts.signal instanceof AbortSignal);
+    assert.equal(calls[0]!.opts.roomCode, "TEST");
+  });
+
+  test("answer: submits 2–5s after every human has answered", async () => {
+    const game = new FakeGame({ random: mulberry32(2) });
+    const start = Date.now();
+    game.enter("answer", 1, 30_000, { round: currentRound(1, "light"), answerProgress: { answered: 0, total: 4 } });
+    await advance(3_000);
+    game.update({ answerProgress: { answered: 3, total: 4 } });
+    await advance(10_000);
+    const answer = game.of("answer")[0]!;
+    assert.ok(answer.at - start >= 5_000 && answer.at - start <= 8_100, `submitted at ${answer.at - start}ms`);
+  });
+
+  test("answer: a failed Muse call falls back at the planned slot (personal tier)", async () => {
+    const game = new FakeGame({ muse: fakeMuse("fail", []), random: mulberry32(3) });
+    const start = Date.now();
+    game.enter("answer", 2, 30_000, { round: currentRound(2, "personal"), answerProgress: { answered: 0, total: 4 } });
+    await advance(30_000);
+    const answer = game.of("answer")[0]!;
+    assert.equal(answer.args[0], "boba with my roommate");
+    assert.ok(answer.at - start >= 10_500 && answer.at - start <= 25_600);
+  });
+
+  test("answer: a stuck call hits the deadline guard at end−3s", async () => {
+    const game = new FakeGame({ muse: fakeMuse("hang", []), random: mulberry32(4) });
+    const start = Date.now();
+    game.enter("answer", 1, 30_000, { round: currentRound(1, "light"), answerProgress: { answered: 0, total: 4 } });
+    await advance(30_000);
+    const answer = game.of("answer")[0]!;
+    assert.equal(answer.args[0], "tacos no question");
+    assert.ok(Math.abs(answer.at - start - 27_000) <= 100, `submitted at ${answer.at - start}ms`);
+  });
+
+  test("answer: invalid output is regenerated once, then falls back", async () => {
+    const calls: MuseLog[] = [];
+    const game = new FakeGame({ muse: fakeMuse("invalid", calls), random: mulberry32(5) });
+    game.enter("answer", 1, 30_000, { round: currentRound(1, "light"), answerProgress: { answered: 0, total: 4 } });
+    await advance(30_000);
+    assert.equal(calls.length, 2);
+    assert.equal(game.of("answer")[0]!.args[0], "tacos no question");
+  });
+
+  test("discuss: replies are never visible sooner than 6.5s after their trigger, nor sent in the last 4s", async () => {
+    let replies = 0;
+    for (let seed = 1; seed <= 20; seed++) {
+      const game = new FakeGame({ random: mulberry32(seed) });
+      const start = Date.now();
+      game.enter("discuss", 1, 45_000, { round: currentRound(1, "light") });
+      await advance(1_000);
+      const trigger = game.humanSays("h1", "fox r u even real");
+      await advance(44_000);
+      const chats = game.of("chat");
+      for (const c of chats) {
+        assert.ok(c.at + CHAT_DELAY_MS - trigger.at >= 6_500, `seed ${seed}: visible ${c.at + CHAT_DELAY_MS - trigger.at}ms after trigger`);
+        assert.ok(start + 45_000 - c.at >= 4_000, `seed ${seed}: sent with ${start + 45_000 - c.at}ms left`);
+      }
+      if (chats.some((c) => c.args[0] === "group text")) replies++;
+      game.ai.dispose();
+    }
+    assert.ok(replies >= 12, `only ${replies}/20 games replied to a direct question`);
+  });
+
+  test("discuss: on Muse failure, an accusation gets an accused fallback line", async () => {
+    const game = new FakeGame({ muse: fakeMuse("fail", []), random: low });
+    game.enter("discuss", 1, 45_000, { round: currentRound(1, "light") });
+    await advance(1_000);
+    game.humanSays("h1", "Fox is def the AI");
+    await advance(44_000);
+    assert.deepEqual(game.of("chat").map((c) => c.args), [["bro what 💀", "group"]]);
+  });
+
+  test("discuss: on Muse failure, unaddressed messages and openers stay quiet", async () => {
+    const game = new FakeGame({ muse: fakeMuse("fail", []), random: low });
+    game.enter("discuss", 1, 45_000, { round: currentRound(1, "light") });
+    await advance(1_000);
+    game.humanSays("h1", "anyone else running on no sleep");
+    await advance(44_000);
+    assert.equal(game.of("chat").length, 0);
+  });
+
+  test("discuss: consecutive group messages are at least 8s apart", async () => {
+    const game = new FakeGame({ muse: fakeMuse("ok", [], 500), random: low });
+    game.enter("discuss", 1, 45_000, { round: currentRound(1, "light") });
+    await advance(1_000);
+    game.humanSays("h1", "fox whats ur major");
+    await advance(200);
+    game.humanSays("h2", "@fox and where are u from");
+    await advance(43_800);
+    const times = game.of("chat").map((c) => c.at);
+    assert.ok(times.length >= 2);
+    for (let i = 1; i < times.length; i++) assert.ok(times[i]! - times[i - 1]! >= 8_000);
+  });
+
+  test("discuss: nothing is sent with less than 4s left", async () => {
+    const game = new FakeGame({ muse: fakeMuse("ok", [], 500), random: low });
+    game.enter("discuss", 1, 8_000, { round: currentRound(1, "light") });
+    await advance(500);
+    game.humanSays("h1", "fox??");
+    await advance(7_500);
+    assert.equal(game.of("chat").length, 0);
+  });
+
+  test("vote: bandwagons, never votes for itself, and casts 1–3s after every human voted", async () => {
+    const game = new FakeGame({ random: low });
+    const start = Date.now();
+    game.enter("vote", 2, 12_000, {
+      round: currentRound(2, "personal"),
+      history: [record(1, "light", { h1: 1, h2: 2, [AI]: 1 }), record(2, "personal", null)],
+      voteProgress: { voted: 0, total: 4 },
+    });
+    await advance(500);
+    game.update({ voteProgress: { voted: 3, total: 4 } });
+    await advance(11_500);
+    const [vote, ...extra] = game.of("vote");
+    assert.equal(extra.length, 0);
+    assert.equal(vote!.args[0], "h2");
+    assert.ok(vote!.at - start >= 1_500 && vote!.at - start <= 3_600, `cast at ${vote!.at - start}ms`);
+  });
+
+  test("vote: random seeds never self-vote", async () => {
+    for (let seed = 1; seed <= 30; seed++) {
+      const game = new FakeGame({ random: mulberry32(seed) });
+      game.enter("vote", 1, 12_000, { round: currentRound(1, "light"), history: [record(1, "light", null)], voteProgress: { voted: 0, total: 4 } });
+      await advance(12_000, 500);
+      const votes = game.of("vote");
+      assert.equal(votes.length, 1);
+      assert.notEqual(votes[0]!.args[0], AI);
+    }
+  });
+
+  test("pairChat → pairResults → finalVote: replies to the partner, submits a collab, vouches, final-votes a non-partner", async () => {
+    const game = new FakeGame({ random: low });
+    game.view.me!.myPairId = "p1";
+    const pairs = [{ id: "p1", members: [AI, "h2"] }, { id: "p2", members: ["h1", "h3"] }];
+    const history = [record(1, "light", { h2: 3, h1: 1 }), record(2, "personal", { h2: 1 }), record(3, "collab", null)];
+    const start = Date.now();
+    game.enter("pairChat", 3, 90_000, { round: currentRound(3, "collab"), pairs, history });
+    await advance(12_000);
+    game.humanSays("h2", "hey whats ur major", "pair");
+    await advance(78_000);
+    assert.ok(game.of("chat").some((c) => c.args[0] === "pair text" && c.args[1] === "pair"));
+    const collab = game.of("collab")[0]!;
+    assert.equal(collab.args[0], "collab text");
+    assert.ok((collab.args[0] as string).length <= LIMITS.collabMaxChars);
+    assert.ok(collab.at - start >= 49_500 && collab.at - start <= 78_000, `collab at ${collab.at - start}ms`);
+
+    const vouchStart = Date.now();
+    game.enter("pairResults", 3, 20_000);
+    await advance(20_000);
+    const vouch = game.of("vouch")[0]!;
+    assert.deepEqual(vouch.args, ["h2", true]);
+    assert.ok(vouch.at - vouchStart >= 6_000 && vouch.at - vouchStart <= 14_000);
+
+    game.enter("finalVote", 3, 15_000, { voteProgress: { voted: 0, total: 4 } });
+    await advance(15_000);
+    assert.deepEqual(game.of("vote")[0]!.args, ["h1"]);
+
+    const info = game.ai.getRevealInfo();
+    assert.deepEqual(info.persona, { name: "Jordan", blurb: "Jordan, sophomore CS from Houston" });
+    assert.ok(info.notes.length >= 3 && info.notes.length <= 6);
+    assert.ok(info.notes.every((n) => n.text.length <= 120));
+  });
+
+  test("pairChat: a stuck collab call falls back at the deadline guard", async () => {
+    const game = new FakeGame({ muse: fakeMuse("hang", []), random: low });
+    game.view.me!.myPairId = "p1";
+    const start = Date.now();
+    game.enter("pairChat", 3, 90_000, { round: currentRound(3, "collab"), pairs: [{ id: "p1", members: [AI, "h2"] }] });
+    await advance(90_000, 500);
+    const collab = game.of("collab")[0]!;
+    assert.equal(collab.args[0], "we both hate 8ams");
+    assert.ok(Math.abs(collab.at - start - 87_000) <= 500);
+  });
+
+  test("a phase change aborts the previous phase's call and its pending actions", async () => {
+    const calls: MuseLog[] = [];
+    const game = new FakeGame({ muse: fakeMuse("hang", calls), random: mulberry32(9) });
+    game.enter("answer", 1, 30_000, { round: currentRound(1, "light"), answerProgress: { answered: 0, total: 4 } });
+    await advance(1_000);
+    game.enter("discuss", 1, 45_000);
+    await advance(100);
+    assert.equal(calls[0]!.opts.signal!.aborted, true);
+    await advance(30_000);
+    assert.equal(game.of("answer").length, 0);
+  });
+
+  test("dispose cancels every timer and aborts in-flight calls", async () => {
+    const calls: MuseLog[] = [];
+    const game = new FakeGame({ muse: fakeMuse("hang", calls), random: mulberry32(10) });
+    game.enter("answer", 1, 30_000, { round: currentRound(1, "light"), answerProgress: { answered: 0, total: 4 } });
+    await advance(1_000);
+    game.ai.dispose();
+    assert.equal(calls[0]!.opts.signal!.aborted, true);
+    game.update({ answerProgress: { answered: 3, total: 4 } });
+    await advance(60_000, 1_000);
+    assert.equal(game.actions.length, 0);
+  });
+
+  test("onEvent never throws, even when Part 2 code throws", async () => {
+    const humanness = fakeHumanness({ computeStyleProfile: () => { throw new Error("bug in style"); } });
+    const game = new FakeGame({ humanness, random: mulberry32(11) });
+    game.enter("answer", 1, 30_000, { round: currentRound(1, "light"), answerProgress: { answered: 0, total: 4 } });
+    await advance(30_000);
+    assert.equal(game.of("answer")[0]!.args[0], "tacos no question");
+    assert.doesNotThrow(() => game.ai.onEvent({ type: "stateUpdated" }, {} as RoomView));
+    assert.doesNotThrow(() => game.ai.onEvent({ type: "phaseChanged", phase: "discuss", round: 1 }, null as unknown as RoomView));
+  });
+});
