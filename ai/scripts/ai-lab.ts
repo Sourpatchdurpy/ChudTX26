@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import type { AiMode, MuseCall } from "@game/shared";
-import { fixture } from "../fixtures/scenarios.js";
+import { fixture, mockFixtureOutput } from "../fixtures/scenarios.js";
 import { buildRequest } from "../prompts.js";
 import { generateTurn } from "../runtime/pipeline.js";
 import { museFromEnvironment } from "../runtime/muse.js";
@@ -19,9 +19,9 @@ const plannedMaxCalls=n*4;
 console.log(JSON.stringify({mode:live?"LIVE":"mocked",runs:n,normalCalls:n,maxProviderAttempts:plannedMaxCalls,regenerationAllowance:n,estimatedMaximumCostUsd:plannedMaxCalls*0.025}));
 if(live&&plannedMaxCalls>10&&!args.includes("--yes"))throw new Error("More than ten possible calls require --yes. Human approval is separately required for agent-run live evaluations.");
 if(live&&tier!=="baseline"&&!args.includes("--approved-tier"))throw new Error("Higher live tiers require an approved and evaluated policy; --approved-tier records the operator assertion.");
-const ctx=fixture(name),requestedMode=arg("--mode",ctx.mode);
-if(!["answer","group","pair","collab"].includes(requestedMode))throw new Error("invalid --mode");
-ctx.mode=requestedMode as AiMode;
+const requestedMode=arg("--mode","");
+if(requestedMode&&!["answer","group","pair","collab"].includes(requestedMode))throw new Error("invalid --mode");
+const ctx=fixture(name,requestedMode?requestedMode as AiMode:undefined);
 if(tier!=="baseline")ctx.generationPolicy={...BASELINE_POLICY,approved:["baseline",tier],evaluated:["baseline",tier]};
 const metrics:MuseMetric[]=[];
 const liveCall=live?museFromEnvironment(m=>metrics.push(m)):undefined;
@@ -32,8 +32,7 @@ for(let i=0;i<n;i++) {
   const call:MuseCall=liveCall??(async<T>()=>{
     if(name==="api-failure")throw new Error("synthetic API failure");
     if(name==="invalid-structured-output")return {wrong:"synthetic malformed object"} as T;
-    return (ctx.mode==="answer"?{answer:"potato and egg tacos",note:"I stuck with my usual order"}:ctx.mode==="collab"?{result:"we haven't settled on one yet",note:"I didn't invent an agreement"}:
-      {action:"send",message:"what gave you that idea",note:"I answered the accusation briefly"}) as T;
+    return mockFixtureOutput(name,ctx) as T;
   });
   const started=performance.now();
   try {

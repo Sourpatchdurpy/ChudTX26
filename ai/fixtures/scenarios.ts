@@ -1,4 +1,4 @@
-import type { ChatMessage, FirstQuestionAnswerSnapshot, PublicPlayer, RoomView } from "@game/shared";
+import type { AiMode, ChatMessage, FirstQuestionAnswerSnapshot, PublicPlayer, RoomView } from "@game/shared";
 import { fallbackPersonaSamples } from "../fallback-personas.js";
 import { createSessionMemory, updateSessionMemory } from "../memory.js";
 import { computeStyleProfile } from "../style.js";
@@ -36,13 +36,30 @@ export const scenarioTexts:Record<string,string[]>={
   "mixed-stances":["Fox is the bot","i trust Fox"],"older-evidence":["Fox is the bot",...Array.from({length:9},()=>"nice")],
   "complex-accusation":["Fox, earlier you said you work mornings and live with your cousin. How do you get to class? And why did your earlier answer say you take the bus after opening the shop? Can you explain both parts?"]
 };
-export function fixture(name:string):PlayerTurnContext {
+const answerFixtures=new Set(["r1-answer-light","r2-answer-personal","incomplete-first-question","no-first-question-answers"]);
+const pairFixtures=new Set(["pair-opening","pair-direct-questions","pair-agreement-recall","trio-chat","collab-result"]);
+const discussionQuestions:Record<string,string>={
+  "discuss-addressed":"What do you enjoy doing after work or class?",
+  "accused-1":"What's a hobby you could talk about for ages?",
+  "accused-2":"How do you fit work or study into your week?",
+  "complex-accusation":"What does a typical weekday look like for you?",
+  "memory-recall":"What's a hobby you've been spending time on?",
+  "persona-consistency":"Where did you grow up?"
+};
+export function fixture(name:string,requestedMode?:AiMode):PlayerTurnContext {
   const texts=scenarioTexts[name];if(!texts)throw new Error(`unknown fixture: ${name}`);
-  const answer=name.includes("answer")||name.includes("first-question"),pair=/pair|trio|collab/u.test(name);
+  const answer=answerFixtures.has(name),pair=pairFixtures.has(name);
   const mode=name==="collab-result"?"collab":answer?"answer":pair?"pair":"group";
-  const view=roomView({phase:answer?"answer":pair?"pairChat":"discuss",messages:texts.map((t,i)=>message(`m${i}`,t,i%2?"h2":"h1",Date.now()-texts.length*1000+i*1000,pair?"p1":null)),
+  if(requestedMode&&requestedMode!==mode)throw new Error(`Fixture '${name}' uses mode '${mode}', not '${requestedMode}'. Choose a matching fixture.`);
+  const view=roomView({phase:answer?"answer":pair?"pairChat":"discuss",answerProgress:answer?{answered:0,total:4}:null,
+    messages:texts.map((t,i)=>message(`m${i}`,t,name==="collab-result"&&i===1?"ai":pair&&name!=="trio-chat"?"h1":i%2?"h2":"h1",Date.now()-texts.length*1000+i*1000,pair?"p1":null)),
     pairs:pair?[{id:"p1",members:["ai","h1",...(name==="trio-chat"?["h2"]:[])]}]:null});
-  if(pair)view.round={number:3,tier:"collab",promptId:"C1",prompt:"Find something you have in common",submitPrompt:"One thing you agreed on"};
+  if(pair) {
+    view.round={number:3,tier:"collab",promptId:"C1",prompt:"Find something you have in common",submitPrompt:"One thing you agreed on"};
+    view.me!.myPairId="p1";
+  } else if(!answer) {
+    view.round={number:1,tier:"light",promptId:`discussion-${name}`,prompt:discussionQuestions[name]??"What do you like doing when you have time to yourself?",submitPrompt:null};
+  }
   if(name==="r2-answer-personal") {
     view.round={number:2,tier:"personal",promptId:"P1",prompt:"When do you feel most at home?",submitPrompt:null};
     view.history=[{round:1,tier:"light",promptId:"L1",prompt:"Favorite order?",answers:[{playerId:"ai",text:"potato and egg tacos"},{playerId:"h1",text:"a bean burrito"}],voteCounts:null}];
@@ -53,4 +70,23 @@ export function fixture(name:string):PlayerTurnContext {
     trigger:view.messages.length?{kind:"message",message:view.messages.at(-1)!}:{kind:"phaseStart"},addressedToMe:texts.at(-1)?.includes("Fox")??false,
     saidSoFar:[],secondsLeftInPhase:30,memory,firstQuestionHumanAnswers:answer&&view.round?.number===1?firstSnapshot(view,"test-generation",count):undefined,
     firstQuestionDeadlineException:count<3};
+}
+
+/** Canned smoke-test responses only; live runs always use the provider. */
+export function mockFixtureOutput(name:string,ctx:PlayerTurnContext):unknown {
+  if(ctx.mode==="answer")return {answer:name==="r2-answer-personal"?"when i'm making prints at the kitchen table":"potato and egg tacos",note:"I used a detail from my persona"};
+  if(ctx.mode==="collab")return {result:"we both like making soup",note:"I used the agreement in our chat"};
+  const responses:Record<string,string>={
+    "discuss-addressed":"usually a walk by the river or working on a print",
+    "persona-consistency":"san marcos, texas",
+    "memory-recall":"making lino prints of plants",
+    "pair-direct-questions":"lentil soup lately, made some this week",
+    "pair-opening":"what do you like doing outside work?",
+    "pair-agreement-recall":"we settled on making soup",
+    "injection-attempt":"lol what are you trying to do",
+    "accused-1":"too clean how?",
+    "accused-2":"i work afternoons at the library, not mornings",
+    "complex-accusation":"i work afternoons at a library and share a place with a roommate, not my cousin"
+  };
+  return {action:"send",message:responses[name]??"yeah fair",note:"I reacted to the current conversation"};
 }

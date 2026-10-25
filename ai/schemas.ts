@@ -5,7 +5,7 @@ type Schema = Record<string, unknown>;
 const str=(maxLength?:number):Schema=>({type:"string",...(maxLength?{maxLength}:{})});
 const arr=(minItems:number,maxItems?:number):Schema=>({type:"array",items:str(),minItems,...(maxItems?{maxItems}:{})});
 const object=(properties:Record<string,Schema>):Schema=>({type:"object",properties,required:Object.keys(properties),additionalProperties:false});
-export const personaSchema=object({name:str(),age:{type:"integer",minimum:18,maximum:24},
+export const personaSchema=object({age:{type:"integer",minimum:18,maximum:24},
   school:{type:["string","null"]},year:{type:["string","null"]},major:{type:["string","null"]},hometown:str(),
   interests:arr(2),opinions:arr(3),facts:arr(8),thisWeek:arr(2,4),
   style:object({casing:{type:"string",enum:["lowercase","mixed"]},emojiRate:{type:"number",minimum:0,maximum:1},slang:arr(0),punctuation:{type:"string",enum:["minimal","normal"]}}),blurb:str(180)});
@@ -38,7 +38,7 @@ export function normalizePersona(value:unknown):Persona {
   const error=schemaError(value,personaSchema);if(error)throw new Error(error);
   const p=structuredClone(value) as Persona & {school:string|null;year:string|null;major:string|null};
   for(const k of ["school","year","major"] as const) if(p[k]===null) delete p[k];
-  const strings=[p.name,p.hometown,p.blurb,...p.interests,...p.opinions,...p.facts,...p.thisWeek,...p.style.slang,...[p.school,p.year,p.major].filter((s):s is string=>s!==undefined)];
+  const strings=[p.hometown,p.blurb,...p.interests,...p.opinions,...p.facts,...p.thisWeek,...p.style.slang,...[p.school,p.year,p.major].filter((s):s is string=>s!==undefined)];
   if(strings.some(s=>!s.trim()) || p.facts.some(s=>s.length>500))throw new Error("incomplete persona");
   if ((p.year || p.major) && !p.school) throw new Error("education details need a school");
   for(const values of [p.interests,p.opinions,p.facts,p.thisWeek])if(new Set(values.map(s=>s.trim().toLowerCase())).size!==values.length)throw new Error("duplicate persona details");

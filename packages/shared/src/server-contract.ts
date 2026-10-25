@@ -56,6 +56,7 @@ export interface AiPlayer {
   /** Called on every change. Must return fast and never throw: do async work in the background. */
   onEvent(event: GameEvent, view: RoomView): void;
   /** Called once when the game reaches "reveal". */
+  // persona.name is the assigned game nickname, not a generated persona field.
   getRevealInfo(): { persona: { name: string; blurb: string }; notes: AiNoteView[] };
   /** Stop timers and pending Muse calls (room ended or deleted). */
   dispose(): void;
@@ -92,7 +93,6 @@ export interface WorldContext {
 }
 
 export interface Persona {
-  name: string;
   age: number;
   school?: string;
   year?: string;
@@ -108,7 +108,7 @@ export interface Persona {
     slang: string[]; // a few words they actually use
     punctuation: "minimal" | "normal";
   };
-  blurb: string; // one line for the reveal screen: "Jordan, sophomore CS from Houston"
+  blurb: string; // name-free reveal description, e.g. "geography student from San Marcos"
   /** Part 2 may add fields here without a contract change. */
   extra?: Record<string, unknown>;
 }

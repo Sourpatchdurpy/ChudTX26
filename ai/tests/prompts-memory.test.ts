@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fixture, roomView, firstSnapshot, message, roster, scenarioTexts } from "../fixtures/scenarios.js";
+import { fixture, roomView, firstSnapshot, message, roster, scenarioTexts, mockFixtureOutput } from "../fixtures/scenarios.js";
 import { buildAnswerRequest,buildGroupChatRequest,buildPairChatRequest,buildCollabRequest } from "../prompts.js";
 import { createSessionMemory, updateSessionMemory, recordAcceptedOutput, retrieveClaims, disposeSessionMemory } from "../memory.js";
 import { fallbackPersonaSamples } from "../fallback-personas.js";
-import { normalizePersona } from "../schemas.js";
+import { normalizePersona, personaSchema } from "../schemas.js";
 import { selectGeneration, BASELINE_POLICY } from "../generation-policy.js";
 import { computeStances } from "../stances.js";
 import { selectExamples } from "../examples.js";
@@ -12,16 +12,18 @@ import { generatePersona } from "../persona.js";
 import type { MuseCall } from "@game/shared";
 
 test("five complete independent student and nonstudent personas",()=>{
-  const pool=fallbackPersonaSamples();assert.equal(pool.length,5);assert.equal(new Set(pool.map(p=>p.name)).size,5);
-  for(const p of pool){assert.equal("hackathonStory" in p,false);normalizePersona({...p,school:p.school??null,year:p.year??null,major:p.major??null});}
+  const pool=fallbackPersonaSamples();assert.equal(pool.length,5);assert.equal(new Set(pool.map(p=>p.blurb)).size,5);
+  for(const p of pool){assert.equal("name" in p,false);assert.equal("hackathonStory" in p,false);normalizePersona({...p,school:p.school??null,year:p.year??null,major:p.major??null});}
   assert.ok(pool.some(p=>!p.school&&!p.year&&!p.major));pool[0]!.facts[0]="mutated";assert.notEqual(fallbackPersonaSamples()[0]!.facts[0],"mutated");
   assert.throws(()=>normalizePersona({...pool[0],hackathonStory:"removed"}));
+  assert.throws(()=>normalizePersona({...pool[0],school:null,year:null,major:null,name:"Removed Name"}));
+  assert.equal("name" in (personaSchema.properties as object),false);
 });
 test("persona generation normalizes nullable nonstudent education and falls back on invalid objects",async()=>{
   const generated={...fallbackPersonaSamples()[2]!,school:null,year:null,major:null};
   const world={fetchedAt:0,trending:[],news:[],local:[],weather:null,hacktx:[]};
   const call:MuseCall=async<T>()=>generated as T;
-  const p=await generatePersona(world,call);assert.equal(p.name,generated.name);assert.equal("school" in p,false);assert.equal("year" in p,false);assert.equal("major" in p,false);
+  const p=await generatePersona(world,call);assert.equal(p.blurb,generated.blurb);assert.equal("name" in p,false);assert.equal("school" in p,false);assert.equal("year" in p,false);assert.equal("major" in p,false);
   const invalid:MuseCall=async<T>()=>({...generated,age:17,hackathonStory:"removed"}) as T;
   const fallback=await generatePersona(world,invalid);assert.ok(fallback.age>=18&&fallback.age<=24);assert.equal("hackathonStory" in fallback,false);
 });
@@ -29,6 +31,58 @@ test("four modes route to exactly two stable family developer prompts",()=>{
   const ctx=fixture("discuss-addressed"),group=buildGroupChatRequest(ctx),pair=buildPairChatRequest(ctx),collab=buildCollabRequest(ctx),answer=buildAnswerRequest({...ctx,view:roomView(),firstQuestionHumanAnswers:firstSnapshot()});
   assert.equal(group.messages[0]!.content,pair.messages[0]!.content);assert.equal(pair.messages[0]!.content,collab.messages[0]!.content);assert.notEqual(answer.messages[0]!.content,group.messages[0]!.content);
   for(const req of [group,pair,collab,answer]){assert.equal(req.messages.length,2);assert.equal(req.messages[0]!.role,"developer");assert.equal(req.messages[1]!.role,"user");assert.equal(req.prompt_cache_key,"TEST");assert.equal(req.response_format?.json_schema.strict,true);}
+});
+test("every gameplay prompt uses the assigned nickname for self-identification",()=>{
+  const answer=fixture("r1-answer-light"),group=fixture("discuss-addressed"),pair=fixture("pair-direct-questions"),collab=fixture("collab-result");
+  for(const request of [buildAnswerRequest(answer),buildGroupChatRequest(group),buildPairChatRequest(pair),buildCollabRequest(collab)]) {
+    const instructions=request.messages[0]!.content;
+    assert.ok(instructions.includes('Your game-assigned nickname is "Fox"'));
+    assert.ok(instructions.includes("always use this game-assigned nickname"));
+    assert.ok(instructions.includes("Your persona has no personal name; never invent or adopt one"));
+    assert.ok(instructions.includes("Natural first-person pronouns (I, me, my) are fine"));
+  }
+  const renamed=buildGroupChatRequest({...group,myNickname:"Otter"});
+  assert.ok(renamed.messages[0]!.content.includes('Your game-assigned nickname is "Otter"'));
+  assert.ok(!renamed.messages[0]!.content.includes('Your game-assigned nickname is "Fox"'));
+});
+test("discussion task targets its scenario instead of inheriting the food-answer task",()=>{
+  for(const name of ["accused-1","accused-2","discuss-addressed","persona-consistency","complex-accusation"]) {
+    const ctx=fixture(name),request=buildGroupChatRequest(ctx),data=JSON.parse(request.messages[1]!.content);
+    assert.equal(data.mode,"group");assert.equal(data.activeTask.kind,"reply-to-message");
+    assert.equal(data.activeTask.target.text,scenarioTexts[name]!.at(-1));
+    const authorId=ctx.trigger.kind==="message"?ctx.trigger.message.from:"";
+    assert.equal(data.activeTask.target.nickname,ctx.view.players.find(p=>p.id===authorId)?.nickname);
+    assert.equal(data.round.prompt,undefined);assert.equal(data.roundBackground.status,"already-answered");
+    assert.ok(!JSON.stringify(data).includes("What's your go-to food order?"));
+    assert.ok(request.messages[0]!.content.includes("do not answer it again"));
+  }
+});
+test("a real discussion view's round question is labeled background, while answer mode makes it the task",()=>{
+  const ctx=fixture("accused-1");ctx.view.round=roomView().round;
+  const chat=JSON.parse(buildGroupChatRequest(ctx).messages[1]!.content);
+  assert.equal(chat.round.prompt,undefined);assert.equal(chat.roundBackground.question,"What's your go-to food order?");
+  assert.equal(chat.activeTask.target.text,"Fox is the bot, that answer was too clean");assert.equal(chat.activeTask.question,undefined);
+  const answer=JSON.parse(buildAnswerRequest(fixture("r1-answer-light")).messages[1]!.content);
+  assert.equal(answer.activeTask.kind,"answer-question");assert.equal(answer.activeTask.question,"What's your go-to food order?");
+});
+test("pair and collaboration tasks distinguish partner reply from result submission",()=>{
+  const pair=JSON.parse(buildPairChatRequest(fixture("pair-direct-questions")).messages[1]!.content);
+  assert.equal(pair.activeTask.kind,"reply-to-message");assert.equal(pair.activeTask.target.text,"Fox what do you like cooking?");
+  const collab=JSON.parse(buildCollabRequest(fixture("collab-result")).messages[1]!.content);
+  assert.equal(collab.activeTask.kind,"submit-collaboration-result");assert.equal(collab.activeTask.submitPrompt,"One thing you agreed on");
+  assert.equal(collab.round.prompt,undefined);
+  for(const name of ["pair-direct-questions","pair-agreement-recall","trio-chat","collab-result"]) {
+    const ctx=fixture(name),members=ctx.view.pairs![0]!.members;
+    assert.ok(ctx.view.messages.every(m=>members.includes(m.from)),name);
+  }
+});
+test("lab fixtures reject incompatible mode overrides and mocked replies vary with their scenario",()=>{
+  assert.throws(()=>fixture("accused-1","answer"),/uses mode 'group'/);
+  assert.throws(()=>fixture("r1-answer-light","group"),/uses mode 'answer'/);
+  assert.doesNotThrow(()=>fixture("accused-1","group"));
+  const direct=mockFixtureOutput("discuss-addressed",fixture("discuss-addressed")) as {message:string};
+  const accused=mockFixtureOutput("accused-1",fixture("accused-1")) as {message:string};
+  assert.notEqual(direct.message,accused.message);assert.ok(direct.message.includes("print"));
 });
 test("first answer includes every human privately without contaminating ordinary memory",()=>{
   const ctx=fixture("r1-answer-light"),before=structuredClone(ctx.memory),request=buildAnswerRequest(ctx),data=JSON.parse(request.messages[1]!.content);

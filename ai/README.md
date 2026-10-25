@@ -16,6 +16,10 @@ On Windows, `npm.cmd` avoids PowerShell execution-policy restrictions on `npm.ps
 
 The two editable gameplay templates are `prompts/question-answer.ts` and `prompts/conversation-interrogation.ts`. Both share the prefix in `prompts.ts`. Persona generation is a separate lobby operation. Normal turns make one generation invocation; invalid structured output permits one regeneration. Each invocation permits at most two provider attempts. All attempts and backoff share the caller's cancellation signal and absolute cutoff.
 
+Personas have no `name` field. Generation schemas reject it, the fallback sheets and blurbs contain no personal names, and gameplay uses only the game-assigned nickname. The existing reveal payload's display `name` is populated from that nickname, rather than generated persona data.
+
+Every request identifies its current `activeTask`. Answer mode targets the round question. Group/pair chat targets an attributed player message or joins the conversation; a group round question is labeled `roundBackground` with status `already-answered`. Collaboration mode targets the card's result submission. Conversation `round` metadata does not contain an unlabeled question to answer. Group fixtures use scenario-specific round context, and pair messages come only from actual pair members.
+
 ## Server handoff
 
 The real server must wire these exported helpers into its accepted-state mutation path:
@@ -39,7 +43,7 @@ Only the baseline generation policy is enabled by default. Expanded/complex/high
 
 ## Lab and evaluation
 
-The lab supports `--fixture`, `--mode`, `--n` (default 3), `--tier`, `--live` and `--yes`. Mock runs use the same builders, validation, cleanup and fallback pipeline as production. Synthetic artifacts go to the ignored `ai/fixtures/outputs/` directory; no production transcript is persisted.
+The lab supports `--fixture`, `--mode`, `--n` (default 3), `--tier`, `--live` and `--yes`. Each fixture selects its own mode; an explicit `--mode` must match, otherwise the lab reports an error. For example, `accused-1` uses `group`, `r1-answer-light` uses `answer`, and `collab-result` uses `collab`. Mock runs use scenario-specific canned replies with the same builders, validation, cleanup and fallback pipeline as production; they do not measure model relevance. Synthetic artifacts go to the ignored `ai/fixtures/outputs/` directory; no production transcript is persisted.
 
 Live mode prints planned calls, the maximum four provider attempts per run, regeneration allowance and a conservative estimate before executing. More than ten possible calls requires `--yes`; even three runs can permit twelve attempts. Higher live tiers also require `--approved-tier`. These flags are operator assertions/execution guards, not substitutes for the human approval required for agent-run live tests. Setting `--tier` permits selection of that tier; actual selection still follows evidence and remaining time.
 

@@ -191,7 +191,7 @@ export function createAiPlayer(init:AiPlayerInit,options:ControllerOptions):AiPl
     const selected=[notes.find(n=>n.kind==="answer"&&n.round===1),notes.find(n=>n.kind==="answer"&&n.round===2),
       notes.filter(n=>n.kind==="group").sort((a,b)=>Number(b.accused)-Number(a.accused)||b.text.length-a.text.length)[0],notes.find(n=>n.kind==="pair"),notes.find(n=>n.kind==="vouch"),notes.find(n=>n.kind==="finalVote")]
       .filter((n):n is NonNullable<typeof n>=>Boolean(n)).map(({round,text})=>({round,text}));
-    return {persona:{name:persona.name,blurb:persona.blurb},notes:selected};
+    return {persona:{name:latest?.players.find(p=>p.id===init.aiPlayerId)?.nickname??"",blurb:persona.blurb},notes:selected};
   },dispose:()=>{
     if(disposed)return;disposed=true;for(const slot of slots.values())retire(slot);slots.clear();for(const timer of timers)clearTimeout(timer);timers.clear();snapshot=undefined;saidSoFar.length=0;consideredMessageIds.clear();disposeSessionMemory(memory);
   }};

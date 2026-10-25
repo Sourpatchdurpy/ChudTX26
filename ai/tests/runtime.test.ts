@@ -116,12 +116,20 @@ test("server hooks emit private copied snapshots only; map resubmission replaces
   assert.equal(first.answers[0]!.text,"one");assert.equal(next.answers[0]!.text,"replacement");assert.equal(next.submittedCount,1);assert.equal(next.revision,2);
   assert.equal("firstQuestionHumanAnswers" in view,false);assert.equal(JSON.stringify(view).includes("replacement"),false);assert.equal(events.length,3);notifier.dispose();assert.equal(notifier.publish(view,answers),null);
 });
+test("reveal display name comes from the game nickname, without a persona name field",()=>{
+  const h=controllerHarness(async<T>()=>({} as T));
+  try {
+    h.player.onEvent({type:"stateUpdated"},h.view);
+    assert.equal(h.player.getRevealInfo().persona.name,"Fox");
+    assert.equal(h.player.getRevealInfo().persona.blurb,fallbackPersonaSamples()[0]!.blurb);
+  }finally{h.player.dispose();}
+});
 test("readiness deadline freezes supplier persona and ignores late preparation",async()=>{
   const pending=deferred<unknown>(),selected=fallbackPersonaSamples()[2]!;let supplierCalls=0;
   const call:MuseCall=async<T>()=>await pending.promise as T;
   const p=await preparePersonaWithDeadline({world:{fetchedAt:Date.now(),trending:[],news:[],local:[],weather:null,hacktx:[]},call,deadlineAtMs:Date.now()+25,fallback:()=>{supplierCalls++;return selected;}});
-  assert.equal(p.name,selected.name);assert.equal(supplierCalls,1);assert.equal(Object.isFrozen(p),true);assert.equal(Object.isFrozen(p.facts),true);
-  pending.resolve({...fallbackPersonaSamples()[0],school:null,year:null,major:null});await flush();assert.equal(p.name,selected.name);
+  assert.equal(p.blurb,selected.blurb);assert.equal("name" in p,false);assert.equal(supplierCalls,1);assert.equal(Object.isFrozen(p),true);assert.equal(Object.isFrozen(p.facts),true);
+  pending.resolve({...fallbackPersonaSamples()[0],school:null,year:null,major:null});await flush();assert.equal(p.blurb,selected.blurb);
 });
 test("dispose aborts in-flight work; new session has a new generation and no memory",async()=>{
   const pending=deferred<unknown>();const h=controllerHarness(async<T>()=>await pending.promise as T);

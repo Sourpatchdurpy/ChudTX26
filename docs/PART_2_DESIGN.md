@@ -110,7 +110,7 @@ Update the existing shared `Persona` contract in coordination with Part 3: delet
 
 | Field | Required content |
 |---|---|
-| `name`, `age` | Invented name; integer age from 18 through 24 inclusive |
+| `age` | Integer age from 18 through 24 inclusive; no persona `name` field is generated or stored |
 | `school`, `year`, `major` | Optional, coherent education details only when appropriate to the persona; omit them for nonstudents or when not applicable |
 | `hometown` | Specific hometown |
 | `interests` | At least two concrete hobbies, with details that support follow-up questions |
@@ -118,13 +118,13 @@ Update the existing shared `Persona` contract in coordination with Part 3: delet
 | `facts` | Occupation or current life situation; living situation; routine; hobbies; favorite food/order, disliked food and dietary preference; a few small anecdotes |
 | `thisWeek` | Two to four plausible recent activities consistent with the person's life; ground external current-event claims in supplied context, without requiring event attendance |
 | `style` | Baseline casing, emoji rate, slang and punctuation preferences |
-| `blurb` | One line suitable for the reveal |
+| `blurb` | One name-free line suitable for the reveal |
 
 The person is fictional; never impersonate a real person. Real event facts, when relevant, come from supplied `WorldContext` and MASTER_PLAN §15; they do not establish that the persona attended an event. Fictional anecdotes must not imply knowledge of a stranger or a shared past with someone just met. Do not assert a scheduled activity already happened when its time has not arrived. With missing current-world data, use ordinary fictional everyday activities, not fabricated headlines, weather or event participation.
 
 Reference the sheet when relevant rather than reciting it. When asked an uncovered detail, prefer a modest consistent answer or ordinary uncertainty. Retain accepted new personal claims so answers do not drift. The immutable sheet has priority over new invented details; a conflicting draft must not be sent.
 
-Provide five complete hand-written fallback personas with different names, ages, occupations/life situations, hobbies, food preferences, opinions and texting baselines. Include both student and nonstudent personas; omit inapplicable education fields. Each must pass the revised schema/completeness validation with no `hackathonStory`. Select randomly and return a fresh copy, without mutating the pool. Reveal blurbs describe the actual persona, not a hardcoded college student.
+Provide five complete hand-written fallback personas with different ages, occupations/life situations, hobbies, food preferences, opinions and texting baselines. Include both student and nonstudent personas; omit inapplicable education fields. Each must pass the revised schema/completeness validation with no `name` or `hackathonStory`. Do not embed a personal name in blurbs or other persona fields. The game-assigned nickname is the sole self-identification name in all gameplay modes and supplies the existing reveal display-name field. Select randomly and return a fresh copy, without mutating the pool. Reveal blurbs describe the actual persona, not a hardcoded college student.
 
 ### 2.3 Session state and memory
 
