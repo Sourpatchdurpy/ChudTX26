@@ -1,13 +1,13 @@
 // The AI's "phone typer" timing model (docs/PART_4_AI_RUNTIME_CONTENT.md §3).
-// The server adds CHAT_DELAY_MS on top of everything here, for everyone.
-import { AI_EXTRA_JITTER_MS } from "@game/shared";
+// Messages become visible on submission; the server then enforces a send cooldown.
 import { uniform } from "../util.js";
 
 /** Reading the trigger message after it becomes visible. */
-export const READ_DELAY_MS: readonly [number, number] = [1_500, 4_000];
-export const THINK_DELAY_MS: readonly [number, number] = [500, 2_000];
+export const READ_DELAY_MS: readonly [number, number] = [800, 1_800];
+export const THINK_DELAY_MS: readonly [number, number] = [200, 700];
 /** Thumb typing speed, chars per second. */
-export const TYPING_CPS: readonly [number, number] = [4, 7];
+export const TYPING_CPS: readonly [number, number] = [9, 15];
+export const CHAT_BATCH_MS = 900;
 
 /** Never send within this long of our last message on the same channel. */
 export const MIN_GAP_MS = 8_000;
@@ -15,11 +15,12 @@ export const MIN_GAP_MS = 8_000;
 export const MIN_PHASE_LEFT_MS = 4_000;
 /** Answer / collab fallback fires this long before the phase ends. */
 export const DEADLINE_GUARD_MS = 3_000;
-/** A reply is dropped as stale once this many newer messages arrived (unless it was addressed to us). */
-export const STALE_AFTER_MESSAGES = 3;
+/** Refresh a draft when multiple substantive messages have overtaken it. */
+export const STALE_AFTER_MESSAGES = 2;
 
 export function typingMs(chars: number, random: () => number = Math.random): number {
-  return (chars / uniform(TYPING_CPS[0], TYPING_CPS[1], random)) * 1000;
+  // Do not make an already-generated reply wait through a long pretend typing session.
+  return Math.min(6_000, (chars / uniform(TYPING_CPS[0], TYPING_CPS[1], random)) * 1000);
 }
 
 /**
@@ -34,7 +35,7 @@ export function computeSendAt(
 ): number {
   const read = includeRead ? uniform(READ_DELAY_MS[0], READ_DELAY_MS[1], random) : 0;
   const think = uniform(THINK_DELAY_MS[0], THINK_DELAY_MS[1], random);
-  const jitter = uniform(AI_EXTRA_JITTER_MS[0], AI_EXTRA_JITTER_MS[1], random);
+  const jitter = uniform(0, 1_000, random);
   return triggerAt + read + think + typingMs(chars, random) + jitter;
 }
 

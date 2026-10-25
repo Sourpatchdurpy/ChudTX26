@@ -19,8 +19,10 @@ export const DEFAULT_TIMERS: Record<Phase, number | null> = {
   partners: null,
 };
 
-/** Every chat message (group and pair) is held this long before anyone sees it. Hides AI latency. */
-export const CHAT_DELAY_MS = 5_000;
+/** Minimum time between a player's chat messages; messages themselves appear immediately. */
+export const CHAT_COOLDOWN_MS = 5_000;
+/** @deprecated Use CHAT_COOLDOWN_MS. Chat is visible immediately. */
+export const CHAT_DELAY_MS = CHAT_COOLDOWN_MS;
 
 /** Extra random wait the AI adds on top of its human-like typing time (ms range). */
 export const AI_EXTRA_JITTER_MS: readonly [number, number] = [0, 4_000];

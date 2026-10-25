@@ -12,13 +12,13 @@ import type { MuseCallFn } from "../muse.js";
 import { median, oneLine, pick, sleep, truncateAtWord, uniform } from "../util.js";
 import {
   ADDRESSED_REPLY_P, DISCUSS_OPENER_P, PAIR_OPENER_P, PAIR_REPLY_P,
-  classifyMessage, replyProbability, type Addressing,
+  asksForChatReply, classifyMessage, isLowValueChat, isResolvedChat, replyProbability, type Addressing,
 } from "./cadence.js";
 import { VOUCH_P, chooseFinalVote, chooseSuspicionVote, nicknameOf, voteNote, vouchNote } from "./decisions.js";
 import type { ControllerDeps, HumannessDeps, PlayerTurnContext, SessionMemory } from "./deps.js";
 import { selectRevealNotes, type NoteKind, type NoteRecord } from "./notes.js";
 import {
-  DEADLINE_GUARD_MS, MIN_GAP_MS, MIN_PHASE_LEFT_MS, STALE_AFTER_MESSAGES, computeSendAt, slotAt,
+  CHAT_BATCH_MS, DEADLINE_GUARD_MS, MIN_GAP_MS, MIN_PHASE_LEFT_MS, STALE_AFTER_MESSAGES, computeSendAt, slotAt,
 } from "./timing.js";
 
 type Timer = ReturnType<typeof setTimeout>;
@@ -126,6 +126,7 @@ export class AiController implements AiPlayer {
   private guardFn: (() => void) | null = null;
   private chatInFlight = false;
   private pendingChat: ChatRequest | null = null;
+  private chatTimer: Timer | null = null;
   private myGroupCount = 0;
   private humanGroupCounts = new Map<PlayerId, number>();
 
@@ -404,11 +405,13 @@ export class AiController implements AiPlayer {
   private startDiscuss(): void {
     if (this.random() >= DISCUSS_OPENER_P) return;
     const p = this.phase!;
-    this.at(p.startedAt + uniform(6_000, 14_000, this.random), () =>
+    this.at(p.startedAt + uniform(6_000, 14_000, this.random), () => {
+      if (this.myGroupCount > 0 || this.humanGroupCounts.size > 0) return;
       this.requestChat({
         key: p.key, channel: "group", trigger: { kind: "phaseStart" },
         triggerAt: this.now(), addressed: false, accused: false,
-      }),
+      });
+    },
     );
   }
 
@@ -521,26 +524,34 @@ export class AiController implements AiPlayer {
     }
 
     if (p.phase !== "pairChat" || msg.pairId !== this.myPairId()) return;
-    if (this.random() >= PAIR_REPLY_P) return;
+    if (isLowValueChat(msg.text, this.myNickname(), false)) return;
     const { accused } = classifyMessage(msg.text, this.myNickname(), this.myAnswers);
-    this.requestChat({ key: p.key, channel: "pair", trigger: { kind: "message", message: msg }, triggerAt, addressed: true, accused });
+    if (!accused && this.random() >= PAIR_REPLY_P) return;
+    this.requestChat({ key: p.key, channel: "pair", trigger: { kind: "message", message: msg }, triggerAt, addressed: accused || asksForChatReply(msg.text), accused });
   }
 
   /** Roll whether to answer a human group message. Null = stay quiet. */
   private decideGroupReply(msg: ChatMessage): Addressing | null {
+    if (isLowValueChat(msg.text, this.myNickname())) return null;
     const a = classifyMessage(msg.text, this.myNickname(), this.myAnswers);
+    if (a.accused) return a;
+    a.addressed = a.addressed && asksForChatReply(msg.text);
     const counts = this.humans().map((id) => this.humanGroupCounts.get(id) ?? 0);
     const p = a.addressed ? ADDRESSED_REPLY_P : replyProbability(median(counts), this.myGroupCount);
     return this.random() < p ? a : null;
   }
 
-  /** At most one chat turn in flight; while busy, keep only the most relevant newer trigger. */
+  /** Batch a burst into one turn; wait out the send gap before generating a fresh reply. */
   private requestChat(req: ChatRequest): void {
-    if (this.chatInFlight) {
-      if (!this.pendingChat || req.addressed || !this.pendingChat.addressed) this.pendingChat = req;
-      return;
-    }
-    void this.runChat(req);
+    const priority = (r: ChatRequest) => r.accused ? 2 : r.addressed ? 1 : 0;
+    if (!this.pendingChat || priority(req) >= priority(this.pendingChat)) this.pendingChat = req;
+    if (this.chatInFlight || this.chatTimer) return;
+    this.chatTimer = this.at(Math.max(this.now() + CHAT_BATCH_MS, this.lastSentAt[req.channel] + MIN_GAP_MS), () => {
+      this.chatTimer = null;
+      const next = this.pendingChat;
+      this.pendingChat = null;
+      if (next && this.isCurrent(next.key)) void this.runChat(next);
+    });
   }
 
   private async runChat(req: ChatRequest): Promise<void> {
@@ -553,27 +564,49 @@ export class AiController implements AiPlayer {
       this.chatInFlight = false;
       const next = this.pendingChat;
       this.pendingChat = null;
-      if (next && this.isCurrent(next.key)) void this.runChat(next);
+      if (next && this.isCurrent(next.key)) this.requestChat(next);
     }
   }
 
   private async chatTurn(req: ChatRequest, redecided: boolean): Promise<void> {
     if (!this.isCurrent(req.key) || this.msLeft() < CHAT_RESERVE_MS) return;
+    const resolved = () => req.trigger.kind === "message" && isResolvedChat(req.trigger.message, this.view?.messages ?? [], this.myNickname());
+    if (resolved()) return;
+    const contextIds = new Set((this.view?.messages ?? []).map(m => m.id));
+    const refreshIfStale = async (): Promise<boolean> => {
+      if (req.trigger.kind !== "message") return false;
+      const pairId = req.trigger.message.pairId;
+      const newer = (this.view?.messages ?? []).filter(m => m.channel === req.channel && m.pairId === pairId && m.from !== this.aiId && !contextIds.has(m.id) && !isLowValueChat(m.text, this.myNickname(), req.channel === "group"));
+      const newQuestion = this.pendingChat?.addressed && this.pendingChat.trigger.kind === "message" && !contextIds.has(this.pendingChat.trigger.message.id);
+      if (newer.length < STALE_AFTER_MESSAGES && !newQuestion) return false;
+      this.log(`${req.channel} draft overtaken by the conversation${redecided ? ", dropping" : ", refreshing once"}`);
+      if (!redecided) {
+        const latest = newer[newer.length - 1] ?? req.trigger.message;
+        const pending = this.pendingChat;
+        this.pendingChat = null;
+        let next = req;
+        if (pending && (pending.accused || (!req.accused && pending.addressed))) next = pending;
+        else if (!req.addressed) next = { ...req, trigger: { kind: "message", message: latest }, triggerAt: this.toLocal(latest.at), ...classifyMessage(latest.text, this.myNickname(), this.myAnswers) };
+        await this.chatTurn(next, true);
+      }
+      return true;
+    };
     const isReply = req.trigger.kind === "message";
     const gen = await this.generate(req.channel, req.trigger, req.addressed, req.key, CHAT_RESERVE_MS);
-    if (!this.isCurrent(req.key) || gen.kind === "skip") return;
+    if (!this.isCurrent(req.key) || gen.kind === "skip" || resolved()) return;
+    if (await refreshIfStale()) return;
 
     let text: string;
     let note: string;
     if (gen.kind === "text") {
       ({ text, note } = gen);
     } else {
-      // Nobody is waiting on an opener or an unaddressed group message: silence beats a canned line.
-      if (!isReply || (req.channel === "group" && !req.addressed)) return;
-      const line = this.pickFallback(req.channel === "pair" ? "pair" : req.accused ? "accused" : "group");
+      // A canned denial does not answer an accusation. Never manufacture a defense on API failure.
+      if (!isReply || req.accused || (req.channel === "group" && !req.addressed)) return;
+      const line = this.pickFallback(req.channel === "pair" ? "pair" : "group");
       if (!line) return;
       text = truncateAtWord(oneLine(line), LIMITS.chatMaxChars);
-      note = req.accused ? "got called the bot and my brain lagged, so i just played it off" : "";
+      note = "";
     }
 
     const sendAt = Math.max(
@@ -583,28 +616,15 @@ export class AiController implements AiPlayer {
     );
     if (this.endsAtOrInfinity() - sendAt < MIN_PHASE_LEFT_MS) return this.log(`${req.channel} reply dropped (too close to phase end)`);
     await sleep(sendAt - this.now(), this.phase!.ac.signal);
-    if (!this.isCurrent(req.key) || this.msLeft() < MIN_PHASE_LEFT_MS) return;
+    if (!this.isCurrent(req.key) || this.msLeft() < MIN_PHASE_LEFT_MS || resolved()) return;
 
-    // Stale check: the conversation moved on while we were "typing".
-    if (req.trigger.kind === "message" && !req.addressed) {
-      const newer = this.newerHumanMessages(req.trigger.message);
-      if (newer.length >= STALE_AFTER_MESSAGES) {
-        const latest = newer[newer.length - 1]!;
-        const decision = redecided || req.channel !== "group" ? null : this.decideGroupReply(latest);
-        this.log(`${req.channel} reply dropped as stale${decision ? ", re-deciding on the latest message" : ""}`);
-        if (decision) {
-          await this.chatTurn(
-            { ...req, trigger: { kind: "message", message: latest }, triggerAt: this.toLocal(latest.at), ...decision },
-            true,
-          );
-        }
-        return;
-      }
-    }
+    if (await refreshIfStale()) return;
 
     const round = this.phase?.round ?? null;
     const res = this.actions.sendChat(text, req.channel);
     if (!res.ok) return this.log(`${req.channel} message rejected (${res.error})`);
+    // A refreshed/batched request has already considered these messages together.
+    if (this.pendingChat?.trigger.kind === "message" && contextIds.has(this.pendingChat.trigger.message.id)) this.pendingChat = null;
     this.lastSentAt[req.channel] = this.now();
     this.saidSoFar.push(text);
     this.remember(req.channel, text, note, res);
@@ -616,12 +636,6 @@ export class AiController implements AiPlayer {
       this.sentPairMessage = true;
     }
     this.log(`${req.channel} message sent (${gen.kind === "text" ? "model" : "fallback"}${req.addressed ? ", addressed" : ""})`);
-  }
-
-  private newerHumanMessages(trigger: ChatMessage): ChatMessage[] {
-    return (this.view?.messages ?? []).filter(
-      (m) => m.channel === trigger.channel && m.pairId === trigger.pairId && m.at > trigger.at && m.from !== this.aiId,
-    );
   }
 
   // ── Muse pipeline: builder → museCall → humanize → validate (regenerate once) ──
@@ -637,6 +651,7 @@ export class AiController implements AiPlayer {
       const deadlineAtMs = p.endsAt == null ? undefined : p.endsAt - reserveMs;
       try {
         const ctx = this.buildCtx(mode, trigger, addressed, deadlineAtMs);
+        if (attempt > 0) ctx.regenerationFeedback = reason;
         const raw = await this.call<unknown>(this.builderFor(mode)(ctx), {
           label: mode, timeoutMs, deadlineAtMs, signal: p.ac.signal, roomCode: this.roomCode,
         });
@@ -829,6 +844,7 @@ export class AiController implements AiPlayer {
   private clearPhase(): void {
     for (const timer of this.timers) clearTimeout(timer);
     this.timers.clear();
+    this.chatTimer = null;
     this.guard = null;
     this.guardFn = null;
     this.phase?.ac.abort();

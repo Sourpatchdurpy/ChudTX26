@@ -28,7 +28,7 @@ export interface ClientToServerEvents {
   "game:start": (ack: Ack) => void;
   /** "answer" phase only. Can be resubmitted until the phase ends (last one wins). */
   "answer:submit": (p: { text: string }, ack: Ack) => void;
-  /** group: "discuss" phase. pair: "pairChat" phase. Message becomes visible after CHAT_DELAY_MS. */
+  /** group: "discuss" phase. pair: "pairChat" phase. Visible immediately; sender then enters a cooldown. */
   "chat:send": (p: { text: string; channel: Channel }, ack: Ack<{ messageId: string; visibleAt: number }>) => void;
   /** "vote" or "finalVote". Can't vote for yourself. Changing your vote is allowed until the phase ends. */
   "vote:cast": (p: { targetId: PlayerId }, ack: Ack) => void;

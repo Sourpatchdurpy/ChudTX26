@@ -1,10 +1,10 @@
-import { CHAT_DELAY_MS } from "@game/shared";
 import type { AiPlayer, AiPlayerInit, AiMode, AiNoteView, FirstQuestionAnswerSnapshot, GameEvent, MuseCall, RoomView } from "@game/shared";
 import { createSessionMemory, updateSessionMemory, recordAcceptedOutput, disposeSessionMemory } from "../memory.js";
 import { computeStyleProfile } from "../style.js";
 import { validateFirstSnapshot } from "../examples.js";
 import { selectGeneration } from "../generation-policy.js";
 import { mentions } from "../stances.js";
+import { asksForChatReply, isLowValueChat, isResolvedChat } from "../chat-policy.js";
 import { generateTurn, safeFallback } from "./pipeline.js";
 import type { TurnResult } from "./pipeline.js";
 import type { GenerationPolicy, GenerationState, PlayerTurnContext } from "../types.js";
@@ -17,7 +17,7 @@ export interface ControllerOptions {
 interface Slot {
   mode:AiMode;key:string;scope:AbortController;cutoff:number;submitted:boolean;started:boolean;
   guard?:ReturnType<typeof setTimeout>;reserve?:ReturnType<typeof setTimeout>;sendTimer?:ReturnType<typeof setTimeout>;
-  trigger:PlayerTurnContext["trigger"];addressed:boolean;startedAt:number;messageCount:number;submitAt?:number;
+  trigger:PlayerTurnContext["trigger"];addressed:boolean;startedAt:number;messageCount:number;submitAt?:number;refreshed?:boolean;
 }
 export function createAiPlayer(init:AiPlayerInit,options:ControllerOptions):AiPlayer {
   if(!init.sessionGeneration)throw new Error("sessionGeneration is required");
@@ -33,7 +33,7 @@ export function createAiPlayer(init:AiPlayerInit,options:ControllerOptions):AiPl
   const clear=(timer:ReturnType<typeof setTimeout>|undefined)=>{if(timer){clearTimeout(timer);timers.delete(timer);}};
   const retire=(slot:Slot)=>{slot.scope.abort();clear(slot.guard);clear(slot.reserve);clear(slot.sendTimer);};
   const active=(slot:Slot)=>!disposed&&slot.key===phaseKey&&slots.get(slot.mode)===slot&&latest?.round!==null&&(!slot.submitted);
-  const cutoffFor=(mode:AiMode,view:RoomView)=>(view.phaseEndsAt??Date.now())-(mode==="answer"||mode==="collab"?3000:Math.max(4000,CHAT_DELAY_MS+1000)+250);
+  const cutoffFor=(mode:AiMode,view:RoomView)=>(view.phaseEndsAt??Date.now())-(mode==="answer"||mode==="collab"?3000:4000+250);
   function context(slot:Slot,deadlineException=false):PlayerTurnContext {
     const view=structuredClone(latest!);
     const answers=memory.answerExamples.filter(e=>e.visibility==="revealed").map(e=>({playerId:e.authorId,text:e.answer}));
@@ -44,6 +44,7 @@ export function createAiPlayer(init:AiPlayerInit,options:ControllerOptions):AiPl
   }
   function accept(slot:Slot,result:TurnResult):void {
     if(!active(slot)||result.action==="skip")return;
+    if((slot.mode==="group"||slot.mode==="pair")&&slot.trigger.kind==="message"&&isResolvedChat(slot.trigger.message,memory.messages,latest?.me?.nickname??"")){retire(slot);slots.delete(slot.mode);return;}
     const view=latest!,round=view.round;
     if(!round || (slot.mode==="answer"&&view.phase!=="answer") || (slot.mode==="collab"&&view.phase!=="pairChat") ||
       (slot.mode==="group"&&view.phase!=="discuss") || (slot.mode==="pair"&&view.phase!=="pairChat"))return;
@@ -64,13 +65,18 @@ export function createAiPlayer(init:AiPlayerInit,options:ControllerOptions):AiPl
   }
   function reconsider(slot:Slot):void {
     retire(slot);slots.delete(slot.mode);
+    if(slot.refreshed)return;
     const newest=memory.messages.filter(m=>m.from!==init.aiPlayerId&&m.channel===(slot.mode==="pair"?"pair":"group")).at(-1);
-    if(newest&&latest)queueMicrotask(()=>{if(!disposed&&latest&&slot.key===phaseKey)onEvent({type:"messageVisible",message:newest},latest);});
+    if(newest&&latest) {
+      const next=makeSlot(slot.mode,slot.addressed?slot.trigger:{kind:"message",message:newest},slot.addressed);next.refreshed=true;void run(next);return;
+    }
   }
   async function run(slot:Slot,deadlineException=false):Promise<void> {
     if(!active(slot)||slot.started)return;
+    if((slot.mode==="group"||slot.mode==="pair")&&slot.trigger.kind==="message"&&isResolvedChat(slot.trigger.message,memory.messages,latest?.me?.nickname??"")){retire(slot);slots.delete(slot.mode);return;}
     if(Date.now()>=slot.cutoff){deadlineFallback(slot);return;}
     slot.started=true;
+    slot.messageCount=memory.messages.length;
     const ctx=context(slot,deadlineException),started=Date.now();
     const texts=slot.mode==="answer"&&snapshot?snapshot.answers.map(a=>a.text):memory.messages.filter(m=>m.from!==init.aiPlayerId).slice(-8).map(m=>m.text);
     const selectedPolicy=selectGeneration(texts,slot.trigger.kind==="message"?slot.trigger.message.text:"",slot.cutoff-started,options.generationPolicy,generationState);
@@ -81,6 +87,7 @@ export function createAiPlayer(init:AiPlayerInit,options:ControllerOptions):AiPl
       if(!active(slot)||slot.scope.signal.aborted)return;
       try{options.onTiming?.({mode:slot.mode,generationMs:Date.now()-started,humanWaitMs:slot.mode==="answer"&&latest?.round?.number===1?started-phaseStarted:0,fallback:result.fallback,tier:selectedPolicy.tier,averageWords:selectedPolicy.averageWords,complexShare:selectedPolicy.complexShare});}catch{/* diagnostics cannot change the turn */}
       if(result.action==="skip"){retire(slot);slots.delete(slot.mode);return;}
+      if(result.fallback&&(slot.mode==="group"||slot.mode==="pair")&&slot.trigger.kind==="message"&&/\b(?:bot|ai|robot(?:ic)?|sus|fake|you said|earlier|contradict\w*)\b/iu.test(slot.trigger.message.text)){retire(slot);slots.delete(slot.mode);return;}
       if(slot.mode==="answer"||slot.mode==="collab") {
         if(Date.now()<slot.cutoff) {
           if(slot.submitAt&&Date.now()<slot.submitAt)slot.sendTimer=later(()=>accept(slot,result),Math.min(slot.submitAt,slot.cutoff-1)-Date.now());
@@ -89,15 +96,15 @@ export function createAiPlayer(init:AiPlayerInit,options:ControllerOptions):AiPl
         return;
       }
       const newer=memory.messages.length-slot.messageCount;
-      if(!slot.addressed&&newer>=3){reconsider(slot);return;}
-      const typingMs=result.text.length/(4+random()*3)*1000;
-      const sendAt=Math.max(started+(1500+random()*2500)+(500+random()*1500)+typingMs+random()*4000,Date.now(),lastSentAt+8000);
-      const latestSend=(latest!.phaseEndsAt??Date.now())-Math.max(4000,CHAT_DELAY_MS+1000);
+      if(newer>=2){reconsider(slot);return;}
+      const typingMs=Math.min(6000,result.text.length/(9+random()*6)*1000);
+      const sendAt=Math.max(started+(800+random()*1000)+(200+random()*500)+typingMs+random()*1000,Date.now(),lastSentAt+8000);
+      const latestSend=(latest!.phaseEndsAt??Date.now())-4000;
       if(sendAt>latestSend){retire(slot);slots.delete(slot.mode);return;}
       clear(slot.guard);
       slot.sendTimer=later(()=>{
         if(!active(slot))return;
-        if(!slot.addressed&&memory.messages.length-slot.messageCount>=3){reconsider(slot);return;}
+        if(memory.messages.length-slot.messageCount>=2){reconsider(slot);return;}
         accept(slot,result);
       },sendAt-Date.now());
     } catch {if(active(slot)&&!slot.scope.signal.aborted)deadlineFallback(slot);}
@@ -123,7 +130,7 @@ export function createAiPlayer(init:AiPlayerInit,options:ControllerOptions):AiPl
       const slot=makeSlot("answer");
       if(view.round?.number===1)checkFirst();
       else {slot.submitAt=Date.now()+(view.phaseEndsAt!-Date.now())*(0.35+random()*0.5);void run(slot);}
-    } else if(view.phase==="discuss"&&random()<0.45)later(()=>{if(!slots.has("group"))void run(makeSlot("group"));},6000+random()*8000);
+    } else if(view.phase==="discuss"&&random()<0.15)later(()=>{if(!slots.has("group")&&!memory.messages.some(m=>m.channel==="group"&&m.at>=phaseStarted))void run(makeSlot("group"));},6000+random()*8000);
     else if(view.phase==="pairChat") {
       if(random()<0.5)later(()=>{if(!slots.has("pair"))void run(makeSlot("pair"));},4000+random()*6000);
       if(view.me?.myCollabResult===null) {
@@ -177,13 +184,22 @@ export function createAiPlayer(init:AiPlayerInit,options:ControllerOptions):AiPl
       } else if(event.type==="messageVisible"&&event.message.from!==init.aiPlayerId) {
         const mode=view.phase==="discuss"?"group":view.phase==="pairChat"?"pair":null;
         if(!mode||event.message.channel!==(mode==="group"?"group":"pair")||!memory.processedMessageIds.has(event.message.id))return;
-        const prior=slots.get(mode);if(prior&&!prior.submitted&&!prior.scope.signal.aborted)return;
+        if(isLowValueChat(event.message.text,view.me.nickname??"",mode==="group"))return;
+        const referenced=mentions(event.message.text,view.me.nickname??"")||memory.acceptedOutputs.some(o=>o.mode==="answer"&&o.text.length>=12&&event.message.text.includes(o.text));
+        const accused=referenced&&/\b(?:bot|ai|sus|robot(?:ic)?|automated|scripted|fake|gpt|llm)\b/iu.test(event.message.text);
+        const addressed=accused||((mode==="pair"||referenced)&&asksForChatReply(event.message.text));
+        const prior=slots.get(mode);if(prior&&!prior.submitted&&!prior.scope.signal.aborted) {
+          if(!prior.started&&(addressed||!prior.addressed)){prior.trigger={kind:"message",message:structuredClone(event.message)};prior.addressed=addressed;}
+          return;
+        }
         if(consideredMessageIds.has(event.message.id))return;consideredMessageIds.add(event.message.id);
-        const addressed=mode==="pair"||mentions(event.message.text,view.me.nickname??"")||memory.acceptedOutputs.some(o=>o.mode==="answer"&&o.text.length>=12&&event.message.text.includes(o.text));
         const counts=view.players.filter(p=>p.id!==init.aiPlayerId).map(p=>memory.messages.filter(m=>m.from===p.id&&m.at>=phaseStarted).length).sort((a,b)=>a-b);
         const median=counts[Math.floor(counts.length/2)]??0,myCount=memory.messages.filter(m=>m.from===init.aiPlayerId&&m.at>=phaseStarted).length;
-        const probability=mode==="pair"?0.9:addressed?0.85:Math.max(0.05,Math.min(0.6,0.25+0.15*(median-myCount)));
-        if(random()<probability)void run(makeSlot(mode,{kind:"message",message:structuredClone(event.message)},addressed));
+        const probability=accused?1:mode==="pair"?0.9:addressed?0.85:Math.max(0.02,Math.min(0.35,0.12+0.08*(median-myCount)));
+        if(random()<probability) {
+          const slot=makeSlot(mode,{kind:"message",message:structuredClone(event.message)},addressed);
+          slot.sendTimer=later(()=>{void run(slot);},Math.max(900,lastSentAt+8000-Date.now()));
+        }
       }
     } catch(error) {reportError(error instanceof Error?error.message:"AI event failure");}
   }

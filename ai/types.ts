@@ -42,4 +42,5 @@ export type PlayerTurnContext = AiTurnContext & {
   memory?: SessionMemory; firstQuestionHumanAnswers?: FirstQuestionAnswerSnapshot;
   firstQuestionDeadlineException?: boolean; generationPolicy?: GenerationPolicy;
   generationState?: GenerationState; generationCutoffAt?: number; nowMs?: number;
+  regenerationFeedback?: string;
 };

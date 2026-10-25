@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, describe, mock, test } from "node:test";
 import assert from "node:assert/strict";
 import { createSessionMemory, fallbackPersona, inferWritingStyle, validateStructuredOutput } from "@game/ai";
-import { CHAT_DELAY_MS, LIMITS } from "@game/shared";
+import { LIMITS } from "@game/shared";
 import type {
   AiActions, Channel, ChatMessage, CurrentRound, FirstQuestionAnswerSnapshot, MuseChatRequest, Persona, Phase,
   PlayerId, RoomView, RoundNumber, RoundRecord, Tier,
@@ -11,6 +11,7 @@ import type {
 import type { MuseCallFn, MuseCallOptions } from "../muse.js";
 import { AiController } from "./AiController.js";
 import { classifyMessage, mentionsNickname, quotesAnswer, replyProbability } from "./cadence.js";
+import {computeSendAt} from "./timing.js";
 import { chooseFinalVote, chooseSuspicionVote } from "./decisions.js";
 import type { HumannessDeps, PlayerTurnContext, SessionMemory } from "./deps.js";
 import { selectRevealNotes, type NoteRecord } from "./notes.js";
@@ -123,8 +124,8 @@ class FakeGame {
       submitAnswer: (text) => (log("answer", text), { ok: true }),
       sendChat: (text, channel) => {
         log("chat", text, channel);
-        const msg = this.message(AI, text, channel, Date.now() + CHAT_DELAY_MS);
-        setTimeout(() => this.deliver(msg), CHAT_DELAY_MS);
+        const msg = this.message(AI, text, channel, Date.now());
+        this.deliver(msg);
         return { ok: true, messageId: msg.id, visibleAt: msg.at };
       },
       castVote: (targetId) => (log("vote", targetId), { ok: true }),
@@ -220,11 +221,15 @@ describe("cadence helpers", () => {
     assert.deepEqual(classifyMessage("someone here is a bot", "Fox", []), { addressed: false, accused: false });
   });
 
-  test("reply probability follows the brief's formula and clamps", () => {
-    assert.equal(replyProbability(0, 0), 0.25);
-    assert.ok(Math.abs(replyProbability(2, 0) - 0.55) < 1e-9);
-    assert.equal(replyProbability(5, 0), 0.6);
-    assert.equal(replyProbability(0, 3), 0.05);
+  test("ordinary reply probability stays restrained and clamps", () => {
+    assert.equal(replyProbability(0, 0), 0.12);
+    assert.ok(Math.abs(replyProbability(2, 0) - 0.28) < 1e-9);
+    assert.equal(replyProbability(5, 0), 0.35);
+    assert.equal(replyProbability(0, 3), 0.02);
+  });
+
+  test("even maximum-length chat adds less than 10 seconds of simulated delay",()=>{
+    assert.ok(computeSendAt(0,LIMITS.chatMaxChars,()=>0.999)<10_000);
   });
 });
 
@@ -335,7 +340,7 @@ describe("AiController", () => {
     assert.equal(game.of("answer")[0]!.args[0], "tacos no question");
   });
 
-  test("discuss: replies are never visible sooner than 6.5s after their trigger, nor sent in the last 4s", async () => {
+  test("discuss: replies retain a brief read/type delay and never send in the last 4s", async () => {
     let replies = 0;
     for (let seed = 1; seed <= 20; seed++) {
       const game = new FakeGame({ random: mulberry32(seed) });
@@ -346,7 +351,7 @@ describe("AiController", () => {
       await advance(44_000);
       const chats = game.of("chat");
       for (const c of chats) {
-        assert.ok(c.at + CHAT_DELAY_MS - trigger.at >= 6_500, `seed ${seed}: visible ${c.at + CHAT_DELAY_MS - trigger.at}ms after trigger`);
+        assert.ok(c.at - trigger.at >= 1_500, `seed ${seed}: visible ${c.at - trigger.at}ms after trigger`);
         assert.ok(start + 45_000 - c.at >= 4_000, `seed ${seed}: sent with ${start + 45_000 - c.at}ms left`);
       }
       if (chats.some((c) => c.args[0] === "group text")) replies++;
@@ -355,13 +360,13 @@ describe("AiController", () => {
     assert.ok(replies >= 12, `only ${replies}/20 games replied to a direct question`);
   });
 
-  test("discuss: on Muse failure, an accusation gets an accused fallback line", async () => {
+  test("discuss: an API failure never substitutes a canned deflection for a defense", async () => {
     const game = new FakeGame({ muse: fakeMuse("fail", []), random: low });
     game.enter("discuss", 1, 45_000, { round: currentRound(1, "light") });
     await advance(1_000);
     game.humanSays("h1", "Fox is def the AI");
     await advance(44_000);
-    assert.deepEqual(game.of("chat").map((c) => c.args), [["bro what 💀", "group"]]);
+    assert.equal(game.of("chat").length, 0);
   });
 
   test("discuss: on Muse failure, unaddressed messages and openers stay quiet", async () => {
@@ -373,25 +378,82 @@ describe("AiController", () => {
     assert.equal(game.of("chat").length, 0);
   });
 
-  test("discuss: consecutive group messages are at least 8s apart", async () => {
-    const game = new FakeGame({ muse: fakeMuse("ok", [], 500), random: low });
+  test("discuss: a burst of direct questions gets one collective reply", async () => {
+    const calls: MuseLog[] = [],built:PlayerTurnContext[]=[];
+    const game = new FakeGame({ muse: fakeMuse("ok", calls, 500), humanness:fakeHumanness({},built), random: low });
     game.enter("discuss", 1, 45_000, { round: currentRound(1, "light") });
     await advance(1_000);
     game.humanSays("h1", "fox whats ur major");
     await advance(200);
     game.humanSays("h2", "@fox and where are u from");
     await advance(43_800);
-    const times = game.of("chat").map((c) => c.at);
-    assert.ok(times.length >= 2);
-    for (let i = 1; i < times.length; i++) assert.ok(times[i]! - times[i - 1]! >= 8_000);
+    assert.equal(game.of("chat").length,1);
+    assert.equal(calls.length,1);
+    assert.equal(built[0]!.view.messages.filter(m=>m.from!==AI).length,2);
+  });
+
+  test("discuss: compliments and trust statements do not start calls or thank-you replies",async()=>{
+    const calls:MuseLog[]=[];
+    const game=new FakeGame({muse:fakeMuse("ok",calls),random:low});
+    game.enter("discuss",1,45_000,{round:currentRound(1,"light")});
+    game.humanSays("h1","nice answer Fox");game.humanSays("h2","I trust Fox");
+    await advance(44_000);
+    assert.equal(calls.length,0);assert.equal(game.of("chat").length,0);
+  });
+
+  test("discuss: a nickname mention without a question may be skipped",async()=>{
+    const calls:MuseLog[]=[],built:PlayerTurnContext[]=[];
+    const game=new FakeGame({muse:fakeMuse("skip",calls,500),humanness:fakeHumanness({},built),random:low});
+    game.enter("discuss",1,45_000,{round:currentRound(1,"light")});
+    game.humanSays("h1","Fox that was a pretty good answer");await advance(10_000);
+    assert.equal(calls.length,1);assert.equal(built[0]!.addressedToMe,false);assert.equal(game.of("chat").length,0);
+  });
+
+  test("discuss: a direct accusation is selected even when a normal reply roll would fail",async()=>{
+    const calls:MuseLog[]=[];
+    const game=new FakeGame({muse:fakeMuse("ok",calls,500),random:()=>0.99});
+    game.enter("discuss",1,45_000,{round:currentRound(1,"light")});
+    game.humanSays("h1","Fox that sounds robotic");await advance(10_000);
+    assert.equal(calls.length,1);assert.equal(game.of("chat").length,1);
+  });
+
+  test("discuss: a resolved accusation does not receive a late defense or acknowledgement",async()=>{
+    const calls:MuseLog[]=[];
+    const game=new FakeGame({muse:fakeMuse("ok",calls),random:low});
+    game.enter("discuss",1,45_000,{round:currentRound(1,"light")});
+    game.humanSays("h1","Fox is the bot");await advance(1200);
+    assert.equal(calls.length,1);
+    game.humanSays("h1","ok that makes sense");await advance(10_000);
+    assert.equal(calls.length,1);assert.equal(game.of("chat").length,0);
+  });
+
+  test("discuss: a question arriving during generation refreshes the draft into one reply",async()=>{
+    const calls:MuseLog[] = [],built:PlayerTurnContext[]=[];
+    const game=new FakeGame({muse:fakeMuse("ok",calls),humanness:fakeHumanness({},built),random:low});
+    game.enter("discuss",1,45_000,{round:currentRound(1,"light")});
+    game.humanSays("h1","Fox why did you pick that answer?");
+    await advance(1200);assert.equal(calls.length,1);
+    game.humanSays("h2","Fox and what did you mean about your shift?");
+    await advance(10_000);
+    assert.equal(calls.length,2);assert.equal(game.of("chat").length,1);
+    assert.ok(built[1]!.view.messages.some(m=>m.text.includes("your shift")));
+  });
+
+  test("discuss: separate later replies keep the 8s send gap",async()=>{
+    const game=new FakeGame({muse:fakeMuse("ok",[],500),random:low});
+    game.enter("discuss",1,45_000,{round:currentRound(1,"light")});
+    game.humanSays("h1","Fox what do you do after class?");await advance(4000);
+    game.humanSays("h2","Fox where do you work?");await advance(12_000);
+    const times=game.of("chat").map(c=>c.at);assert.equal(times.length,2);
+    assert.ok(times[1]!-times[0]!>=8000);
   });
 
   test("discuss: nothing is sent with less than 4s left", async () => {
     const game = new FakeGame({ muse: fakeMuse("ok", [], 500), random: low });
     game.enter("discuss", 1, 8_000, { round: currentRound(1, "light") });
-    await advance(500);
+    await advance(4500);
     game.humanSays("h1", "fox??");
-    await advance(7_500);
+    await advance(3500);
     assert.equal(game.of("chat").length, 0);
   });
 
@@ -554,7 +616,7 @@ describe("AiController", () => {
     game.humanSays("h1", "fox whats your major");
     await advance(44_000);
     assert.deepEqual(game.of("chat").map((c) => c.args), [["lol wait what", "group"]], "the unaddressed opener may skip");
-    assert.equal(calls.filter((c) => c.mode === "group").length, 3, "2 for the addressed reply, 1 for the opener");
+    assert.equal(calls.filter((c) => c.mode === "group").length, 2, "regenerate the direct reply once, without an unrelated opener");
   });
 
   test("Part 2 memory: created per game, kept in sync, passed to builders, records accepted output, disposed", async () => {

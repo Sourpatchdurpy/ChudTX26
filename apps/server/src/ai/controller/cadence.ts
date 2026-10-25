@@ -1,12 +1,13 @@
 // When the AI speaks in chat (docs/PART_4_AI_RUNTIME_CONTENT.md §3 "Cadence rules").
 import { clamp } from "../util.js";
+export { asksForChatReply, isLowValueChat, isResolvedChat } from "@game/ai";
 
 export const ADDRESSED_REPLY_P = 0.85;
-export const DISCUSS_OPENER_P = 0.45;
+export const DISCUSS_OPENER_P = 0.15;
 export const PAIR_OPENER_P = 0.5;
 export const PAIR_REPLY_P = 0.9;
 
-const ACCUSATION_RE = /(^|[^\p{L}\p{N}])(bots?|ai|a\.i\.?|sus|sussy|robot|chat ?gpt|gpt|llm|clanker|npc|fake|computer)(?![\p{L}\p{N}])/iu;
+const ACCUSATION_RE = /(^|[^\p{L}\p{N}])(bots?|ai|a\.i\.?|sus|sussy|robot(?:ic)?|automated|scripted|chat ?gpt|gpt|llm|clanker|npc|fake|computer)(?![\p{L}\p{N}])/iu;
 
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -44,11 +45,12 @@ export interface Addressing {
 
 export function classifyMessage(text: string, myNickname: string, myAnswers: readonly string[]): Addressing {
   const mentioned = mentionsNickname(text, myNickname);
-  const accused = mentioned && ACCUSATION_RE.test(text);
-  return { addressed: mentioned || quotesAnswer(text, myAnswers), accused };
+  const quoted = quotesAnswer(text, myAnswers);
+  const accused = (mentioned || quoted) && ACCUSATION_RE.test(text);
+  return { addressed: mentioned || quoted, accused };
 }
 
 /** Chance to reply to a group message that wasn't addressed to us, from this phase's counts. */
 export function replyProbability(medianHumanCount: number, myCount: number): number {
-  return clamp(0.25 + 0.15 * (medianHumanCount - myCount), 0.05, 0.6);
+  return clamp(0.12 + 0.08 * (medianHumanCount - myCount), 0.02, 0.35);
 }

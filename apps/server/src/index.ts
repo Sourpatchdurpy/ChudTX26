@@ -8,7 +8,7 @@ try {
 import { createServer } from "node:http";
 import { Server } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "@game/shared";
-import { aiMode, chatDelayMs, timerScale } from "./game/config.js";
+import { aiMode, chatCooldownMs, timerScale } from "./game/config.js";
 import { loadContent } from "./game/content.js";
 import type { AiImpl } from "./game/Room.js";
 import { RoomRegistry } from "./game/rooms.js";
@@ -81,7 +81,7 @@ httpServer.on("error", (e) => {
 
 httpServer.listen(port, () => {
   log(
-    `[server] listening on :${port} · AI_MODE=${mode} · TIMER_SCALE=${timerScale()} · CHAT_DELAY_MS=${chatDelayMs()} · ` +
+    `[server] listening on :${port} · AI_MODE=${mode} · TIMER_SCALE=${timerScale()} · CHAT_COOLDOWN_MS=${chatCooldownMs()} · ` +
       `CORS ${corsOrigins.join(", ")}`,
   );
 });

@@ -2,6 +2,7 @@ export { generatePersona } from "./persona.js";
 export { validatePersona } from "./schemas.js";
 export { validateStructuredOutput } from "./runtime/pipeline.js";
 export { inferWritingStyle } from "./writing-style.js";
+export { asksForChatReply, isLowValueChat, isResolvedChat } from "./chat-policy.js";
 export { fallbackPersona } from "./fallback-personas.js";
 export { buildAnswerRequest, buildGroupChatRequest, buildPairChatRequest, buildCollabRequest } from "./prompts.js";
 export { computeStyleProfile, computeChatterProfiles } from "./style.js";

@@ -163,24 +163,25 @@ test("unaddressed stale chat is discarded and reconsidered from the newest visib
   }},{random:()=>0,call:async<T>()=>await (++calls===1?first.promise:second.promise) as T});
   try {
     const view=roomView({phase:"discuss",messages:[message("first","hello")]}),initial=view.messages[0]!;
-    player.onEvent({type:"messageVisible",message:initial},view);await flush();assert.equal(calls,1);
+    player.onEvent({type:"messageVisible",message:initial},view);await delay(950);await flush();assert.equal(calls,1);
     for(let i=0;i<3;i++){const next=message(`new${i}`,`new topic ${i}`,"h2");view.messages.push(next);player.onEvent({type:"messageVisible",message:next},view);}
     first.resolve({action:"send",message:"old topic reply",note:"I replied"});await flush();assert.equal(calls,2);assert.equal(sent.length,0);
   }finally{player.dispose();second.resolve({action:"skip",message:"",note:"I waited"});}
 });
 
-test("chat scheduling retains reading, thinking, typing and server-delay boundary",async(t)=>{
+test("chat scheduling retains reading, thinking and typing before immediate delivery",async(t)=>{
   t.mock.timers.enable({apis:["Date","setTimeout"],now:200000});
   const sent:{text:string;at:number}[]=[];
   const player=createAiPlayer({sessionGeneration:"g",roomCode:"TEST",aiPlayerId:"ai",persona:fallbackPersonaSamples()[0]!,actions:{
-    submitAnswer:()=>({ok:true}),submitCollab:()=>({ok:true}),castVote:()=>({ok:true}),setVouch:()=>({ok:true}),sendChat:text=>{sent.push({text,at:Date.now()});return {ok:true,messageId:"sent",visibleAt:Date.now()+5000};}
-  }},{random:()=>0,call:async<T>()=>({action:"send",message:"yeah fair",note:"I reacted briefly"} as T)});
+    submitAnswer:()=>({ok:true}),submitCollab:()=>({ok:true}),castVote:()=>({ok:true}),setVouch:()=>({ok:true}),sendChat:text=>{sent.push({text,at:Date.now()});return {ok:true,messageId:"sent",visibleAt:Date.now()};}
+  }},{random:()=>0,call:async<T>()=>({action:"send",message:"I walk home",note:"I answered briefly"} as T)});
   try {
     const view=roomView({phase:"discuss",messages:[message("trigger","Fox what do you think?")]});
     player.onEvent({type:"messageVisible",message:view.messages[0]!},view);
     for(let i=0;i<10;i++)await Promise.resolve();
-    t.mock.timers.tick(2000);assert.equal(sent.length,0);
-    t.mock.timers.tick(2250);assert.equal(sent.length,1);assert.equal(sent[0]!.at+5000-200000,9250);
+    t.mock.timers.tick(500);assert.equal(sent.length,0);
+    for(let i=0;i<45;i++){t.mock.timers.tick(100);for(let j=0;j<10;j++)await Promise.resolve();}
+    assert.equal(sent.length,1);assert.ok(sent[0]!.at-200000>=1000&&sent[0]!.at-200000<=5000);
     player.onEvent({type:"messageVisible",message:view.messages[0]!},view);for(let i=0;i<10;i++)await Promise.resolve();assert.equal(sent.length,1);
   }finally{player.dispose();t.mock.timers.reset();}
 });

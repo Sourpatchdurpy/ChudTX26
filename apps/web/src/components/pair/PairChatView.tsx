@@ -1,15 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { Check, Moon, Send, Sun, Users } from 'lucide-react';
-import { LIMITS } from '@game/shared';
+import { CHAT_COOLDOWN_MS, LIMITS } from '@game/shared';
 import PixelSky from '../shared/PixelSky';
 import { useVisualViewportHeight } from '../../hooks/useVisualViewportHeight';
 import type { PairChatViewProps } from '@/types/game';
 
 export type { PairChatViewProps } from '@/types/game';
-
-/** The server holds every message this long before anyone sees it; we show "sending…" meanwhile. */
-const HOLD_SECONDS = 5;
 
 function PixelCorners() {
   return <>
@@ -60,8 +57,8 @@ export default function PairChatView({
     onSendMessage(text);
     stickToBottomRef.current = true;
     setInputText('');
-    setHoldUntil(Date.now() + HOLD_SECONDS * 1000);
-    setTimeout(() => setHoldUntil(0), HOLD_SECONDS * 1000);
+    setHoldUntil(Date.now() + CHAT_COOLDOWN_MS);
+    setTimeout(() => setHoldUntil(0), CHAT_COOLDOWN_MS);
   }
 
   async function saveResult() {
@@ -114,7 +111,7 @@ export default function PairChatView({
           <textarea rows={1} aria-label="Pair message" maxLength={LIMITS.chatMaxChars} value={inputText} disabled={!open} onChange={event => setInputText(event.target.value.slice(0, LIMITS.chatMaxChars))} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send(); } }} placeholder={open ? 'Message your partner...' : 'Pair chat is closed'} className={`max-h-24 min-h-11 min-w-0 flex-1 resize-none rounded-xl border px-3 py-2 text-base focus:outline-2 focus:outline-offset-1 disabled:opacity-50 sm:text-sm ${field}`} />
           <button type="submit" aria-label="Send message" disabled={!open || holding || !inputText.trim()} className={`flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-xl border-b-2 border-[#B31D3F] bg-[#FF5376] px-3 py-2 text-white shadow-[2px_2px_0_#000] hover:bg-[#FF3360] disabled:cursor-not-allowed disabled:opacity-40 ${focusClass}`}><Send size={17} aria-hidden="true" /></button>
         </form>
-        <AnimatePresence>{holding && <motion.p role="status" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className={`font-pixel text-[8px] leading-relaxed ${isDarkMode ? 'text-[#FFADBF]' : 'text-[#8B1634]'}`}>TRANSMITTING...</motion.p>}</AnimatePresence>
+        <AnimatePresence>{holding && <motion.p role="status" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className={`font-pixel text-[8px] leading-relaxed ${isDarkMode ? 'text-[#FFADBF]' : 'text-[#8B1634]'}`}>COOLDOWN...</motion.p>}</AnimatePresence>
       </div>
 
       <form onSubmit={event => { event.preventDefault(); void saveResult(); }} className={`relative shrink-0 space-y-2 rounded-2xl border-2 p-3 backdrop-blur-xs ${glass}`}>

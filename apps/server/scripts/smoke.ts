@@ -2,9 +2,9 @@
 //   TIMER_SCALE=0.3 npm run dev -w @game/server      (in another terminal)
 //   npm run smoke -w @game/server -- [--url http://localhost:4000] [--rooms 2] [--humans 3]
 // Each room: a host + bots play a full game, the host advances reveal → partners
-// and plays again. Checks chat delay, rejoin, the spectator view and acks.
+// and plays again. Checks immediate chat, cooldown, rejoin, spectator view and acks.
 import { io, type Socket } from "socket.io-client";
-import { CHAT_DELAY_MS, type ClientToServerEvents, type RoomView, type ServerToClientEvents } from "@game/shared";
+import { type ClientToServerEvents, type RoomView, type ServerToClientEvents } from "@game/shared";
 
 type S = Socket<ServerToClientEvents, ClientToServerEvents>;
 const arg = (n: string) => {
@@ -69,14 +69,11 @@ async function playRoom(tag: string): Promise<string[]> {
           if (!r.ok) problems.push(`chat rejected: ${r.error}`);
           else if (!chatChecked) {
             chatChecked = true;
-            const delay = r.visibleAt - sentAt;
-            if (Math.abs(delay - CHAT_DELAY_MS) > 300) problems.push(`chat delay ${delay}ms, expected ~${CHAT_DELAY_MS}`);
-            // The message must not be in anyone's view before visibleAt.
-            const seenEarly = () => players.some((q) => q.last?.messages.some((m) => m.id === r.messageId));
-            await wait(Math.max(0, r.visibleAt - serverNow() - 500));
-            if (seenEarly()) problems.push("chat message visible before visibleAt");
-            await wait(1_000);
-            if (!seenEarly()) problems.push("chat message not visible after visibleAt");
+            if (Math.abs(r.visibleAt - sentAt) > 300) problems.push("chat was held instead of sent immediately");
+            const repeat = await call<any>((cb) => p.s.emit("chat:send", { text: "too soon", channel: "group" }, cb));
+            if (repeat.ok) problems.push("chat cooldown did not block a second message");
+            await wait(200);
+            if (!players.every(q => q.last?.messages.some(m => m.id === r.messageId))) problems.push("chat not immediately visible to everyone");
           }
         }
         if (v.phase === "vote" || v.phase === "finalVote") p.s.emit("vote:cast", { targetId: others[0]! }, () => {});

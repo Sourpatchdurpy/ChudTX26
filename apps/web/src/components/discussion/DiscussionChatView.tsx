@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { Moon, Send, Sun } from 'lucide-react';
+import { CHAT_COOLDOWN_MS } from '@game/shared';
 import PixelSky from '../shared/PixelSky';
 import { useVisualViewportHeight } from '../../hooks/useVisualViewportHeight';
 import type { DiscussionChatViewProps, DiscussionMsg, RoundAnswer } from '@/types/game';
@@ -8,7 +9,7 @@ import type { DiscussionChatViewProps, DiscussionMsg, RoundAnswer } from '@/type
 export type { DiscussionChatViewProps, DiscussionMsg, RoundAnswer } from '@/types/game';
 
 const ROUND_SECONDS = 50;
-const HOLD_SECONDS = 5;
+const COOLDOWN_SECONDS = CHAT_COOLDOWN_MS / 1000;
 const CHARACTER_LIMIT = 200;
 
 function PixelCorners() {
@@ -85,7 +86,7 @@ export default function DiscussionChatView({
       const now = Date.now();
       const seconds = Math.max(0, Math.ceil((deadlineRef.current! - now) / 1000));
       setRemaining(seconds);
-      // Expiration wins over a queued message whose release falls after the round.
+      // The phase ending also ends the compose cooldown.
       if (seconds === 0) {
         clearInterval(timer);
         pendingRef.current = null;
@@ -100,7 +101,7 @@ export default function DiscussionChatView({
       const pending = pendingRef.current;
       if (!pending) return;
       setHoldSeconds(Math.max(0, Math.ceil((pending.releaseAt - now) / 1000)));
-      // The message was sent right away; the server holds it for everyone, so this is just the "sending…" state.
+      // The message is already visible; only the next send is blocked.
       if (now >= pending.releaseAt) {
         pendingRef.current = null;
         setHolding(false);
@@ -126,11 +127,11 @@ export default function DiscussionChatView({
 
   function send() {
     if (!callbacksRef.current.onSendMessage || pendingRef.current || endedRef.current || deadlineRef.current === null || Date.now() >= deadlineRef.current || !inputText.trim() || charCount > CHARACTER_LIMIT) return;
-    pendingRef.current = { text: inputText.trim(), releaseAt: Date.now() + HOLD_SECONDS * 1000 };
+    pendingRef.current = { text: inputText.trim(), releaseAt: Date.now() + CHAT_COOLDOWN_MS };
     callbacksRef.current.onSendMessage(inputText.trim());
     stickToBottomRef.current = true;
     setHolding(true);
-    setHoldSeconds(HOLD_SECONDS);
+    setHoldSeconds(COOLDOWN_SECONDS);
     setInputText('');
     inputRef.current?.focus();
   }
@@ -172,14 +173,14 @@ export default function DiscussionChatView({
             <span className={`font-pixel text-[9px] leading-relaxed ${charCount >= 180 ? (isDarkMode ? 'text-[#FF8CA4]' : 'text-[#9E173B]') : accent}`}>[{charCount} / {CHARACTER_LIMIT}]</span>
             <AnimatePresence>{holding && <motion.span role="status" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: reduceMotion ? 0 : 0.15 }} className={`flex items-center gap-1.5 rounded-full border px-2 py-1 font-pixel text-[7px] leading-relaxed sm:text-[8px] ${isDarkMode ? 'border-[#FF5376]/40 bg-[#FF5376]/10 text-[#FFADBF]' : 'border-[#9E173B]/30 bg-white/20 text-[#8B1634]'}`}>
               <motion.span aria-hidden="true" initial={false} animate={reduceMotion ? { opacity: 1 } : { opacity: [0.3, 1, 0.3] }} transition={{ duration: 1, repeat: Infinity }} className="h-1.5 w-1.5 shrink-0 bg-[#FF5376] shadow-[0_0_6px_#FF5376]" />
-              TRANSMITTING {holdSeconds}s...
+              COOLDOWN {holdSeconds}s
             </motion.span>}</AnimatePresence>
           </div>
           <div className="flex items-end gap-2">
             <textarea ref={inputRef} rows={1} aria-label="Discussion message" maxLength={CHARACTER_LIMIT} value={inputText} onChange={event => setInputText(event.target.value.slice(0, CHARACTER_LIMIT))} disabled={!canCompose} placeholder={onSendMessage ? 'Join the discussion...' : 'Discussion is read-only'} onKeyDown={event => {
               if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send(); }
             }} className={`max-h-24 min-h-11 min-w-0 flex-1 resize-none rounded-xl border px-3 py-2 font-sans text-base focus:outline-2 focus:outline-offset-1 disabled:opacity-50 sm:text-sm ${isDarkMode ? 'border-[#00E5FF]/30 bg-black/30 text-white placeholder:text-[#8495B3] focus:outline-[#00E5FF]' : 'border-[#16223B]/40 bg-white/25 text-[#0E1726] placeholder:text-[#526078] focus:outline-[#16223B]'}`} />
-            <button type="submit" aria-label="Transmit message after five-second hold" disabled={!inputText.trim() || holding || !canCompose} className={`flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-2 rounded-xl border-b-2 border-[#B31D3F] bg-[#FF5376] px-3 py-2 font-pixel text-xs text-white shadow-[2px_2px_0_#000] hover:bg-[#FF3360] active:translate-y-1 disabled:cursor-not-allowed disabled:opacity-40 disabled:active:translate-y-0 sm:px-4 ${focusClass}`}><Send size={17} aria-hidden="true" /><span className="hidden text-[9px] sm:inline">SEND</span></button>
+            <button type="submit" aria-label="Send message" disabled={!inputText.trim() || holding || !canCompose} className={`flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-2 rounded-xl border-b-2 border-[#B31D3F] bg-[#FF5376] px-3 py-2 font-pixel text-xs text-white shadow-[2px_2px_0_#000] hover:bg-[#FF3360] active:translate-y-1 disabled:cursor-not-allowed disabled:opacity-40 disabled:active:translate-y-0 sm:px-4 ${focusClass}`}><Send size={17} aria-hidden="true" /><span className="hidden text-[9px] sm:inline">SEND</span></button>
           </div>
         </form>
       </div>

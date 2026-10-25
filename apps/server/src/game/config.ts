@@ -1,6 +1,6 @@
 // Env-derived settings. Read lazily (not at import time) because index.ts loads
 // the root .env after static imports have already been evaluated.
-import { CHAT_DELAY_MS, DEFAULT_TIMERS, type Phase } from "@game/shared";
+import { CHAT_COOLDOWN_MS, DEFAULT_TIMERS, type Phase } from "@game/shared";
 
 export type AiModeName = "stub" | "muse";
 
@@ -30,9 +30,10 @@ export function phaseDurationMs(phase: Phase): number | null {
   return base === null ? null : Math.round(base * timerScale());
 }
 
-export function chatDelayMs(): number {
-  const n = envNumber("CHAT_DELAY_MS");
-  return n !== null && n >= 0 ? n : CHAT_DELAY_MS;
+export function chatCooldownMs(): number {
+  // Existing deployments may still use the old setting name.
+  const n = envNumber("CHAT_COOLDOWN_MS") ?? envNumber("CHAT_DELAY_MS");
+  return n !== null && n >= 0 ? n : CHAT_COOLDOWN_MS;
 }
 
 /** When everyone has answered, the answer phase ends this long after. */

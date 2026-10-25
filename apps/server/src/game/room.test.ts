@@ -6,7 +6,7 @@ import type { Room } from "./Room.js";
 import { RoomRegistry } from "./rooms.js";
 import { flush, makeRoom, sleep, validMatch, TEST_PERSONA } from "./testkit.js";
 
-process.env.CHAT_DELAY_MS = "40";
+process.env.CHAT_COOLDOWN_MS = "40";
 delete process.env.TIMER_SCALE;
 
 const open: Room[] = [];
@@ -154,7 +154,7 @@ describe("answer phase", () => {
 });
 
 describe("chat", () => {
-  test("held for CHAT_DELAY_MS, then visible to everyone; group only in discuss", async () => {
+  test("visible immediately, then the sender waits for cooldown; group only in discuss", async () => {
     const { room, humans, lastView, start, advanceTo } = setup({ humans: 3 });
     await start();
     assert.equal(room.sendChat(humans[0]!.id, "hi", "group").ok, false, "answer phase");
@@ -164,20 +164,22 @@ describe("chat", () => {
     const before = Date.now();
     const r = room.sendChat(humans[0]!.id, "hello all", "group");
     assert.ok(r.ok);
-    assert.ok(r.visibleAt - before >= 40 && r.visibleAt - before < 80);
-    room.broadcast();
-    assert.equal(lastView(humans[0]!.socket)!.messages.length, 0, "not even the sender's copy yet");
-    await sleep(70);
+    assert.ok(r.visibleAt >= before && r.visibleAt <= Date.now());
     for (const h of humans) assert.equal(lastView(h.socket)!.messages[0]?.text, "hello all");
+    assert.equal(room.sendChat(humans[0]!.id, "too soon", "group").ok, false);
+    assert.equal(room.sendChat(humans[1]!.id, "another player", "group").ok, true);
+    await sleep(70);
+    assert.equal(room.sendChat(humans[0]!.id, "ready again", "group").ok, true);
   });
 
-  test("released even if the phase changed meanwhile, and the AI is told", async () => {
+  test("a last-second message is already visible when the phase changes, and the AI is told", async () => {
     const { room, humans, fake, start, advanceTo } = setup({ humans: 3 });
     await start();
     await advanceTo("discuss");
     room.sendChat(humans[1]!.id, "last word", "group");
+    assert.equal(room.messages.at(-1)?.text, "last word");
     await advance(room); // → vote
-    await sleep(70);
+    await flush();
     assert.equal(room.messages.at(-1)?.text, "last word");
     assert.ok(fake.events.some((e) => e.type === "messageVisible" && e.message.text === "last word"));
   });
@@ -191,7 +193,7 @@ describe("chat", () => {
     const sender = humans.find((h) => !room.pairOf(h.id)!.members.includes(room.aiId!))!.id;
     const myPair = room.pairOf(sender)!;
     room.sendChat(sender, "psst", "pair");
-    await sleep(70);
+    assert.equal(room.sendChat(sender, "too soon", "pair").ok, false);
     await flush();
     for (const h of humans) {
       const sees = lastView(h.socket)!.messages.some((m) => m.text === "psst");

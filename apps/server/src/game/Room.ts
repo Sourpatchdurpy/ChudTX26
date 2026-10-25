@@ -28,7 +28,7 @@ import {
   type RunMatchmaker,
   type Vouch,
 } from "@game/shared";
-import { ALL_ANSWERED_GRACE_MS, ALL_VOTED_GRACE_MS, chatDelayMs, PERSONA_WAIT_MS } from "./config.js";
+import { ALL_ANSWERED_GRACE_MS, ALL_VOTED_GRACE_MS, chatCooldownMs, PERSONA_WAIT_MS } from "./config.js";
 import type { ContentStore } from "./content.js";
 import { advance, beginRound, enterPhase } from "./phases.js";
 import { shuffle, withTimeout } from "./random.js";
@@ -91,9 +91,9 @@ export class Room {
   currentRound: CurrentRound | null = null;
   answers = new Map<PlayerId, string>();
 
-  /** Released messages only. */
+  /** Visible messages only. */
   messages: ChatMessage[] = [];
-  pending = new Map<string, { message: ChatMessage; timer: ReturnType<typeof setTimeout> }>();
+  private nextChatAt = new Map<PlayerId, number>();
 
   votes = new Map<PlayerId, PlayerId>();
   /** Round → voter → target. Round 3 = the final vote. */
@@ -314,21 +314,18 @@ export class Room {
     if (!text) return fail("Message is empty.");
     if (text.length > LIMITS.chatMaxChars) return fail(`Message must be at most ${LIMITS.chatMaxChars} characters.`);
 
-    const visibleAt = Date.now() + chatDelayMs();
+    const visibleAt = Date.now();
+    if (visibleAt < (this.nextChatAt.get(id) ?? 0)) return fail("Please wait for the message cooldown before sending again.");
     const message: ChatMessage = { id: nanoid(12), channel, pairId, from: id, text, at: visibleAt };
-    const timer = setTimeout(() => this.releaseMessage(message.id), visibleAt - Date.now());
-    this.pending.set(message.id, { message, timer });
+    this.nextChatAt.set(id, visibleAt + chatCooldownMs());
     this.touch();
+    this.releaseMessage(message);
     return { ok: true, messageId: message.id, visibleAt };
   }
 
-  /** Released even if the phase has changed since it was sent. */
-  private releaseMessage(messageId: string): void {
+  private releaseMessage(message: ChatMessage): void {
     try {
-      const entry = this.pending.get(messageId);
-      if (!entry || this.closed) return;
-      this.pending.delete(messageId);
-      const { message } = entry;
+      if (this.closed) return;
       this.messages.push(message);
       if (message.channel === "group") {
         this.broadcast({ type: "messageVisible", message });
@@ -407,8 +404,7 @@ export class Room {
   /** Disposes the AI and clears all per-game state (keeps seats and usedPromptIds). */
   private endGame(): void {
     this.clearTimer();
-    for (const { timer } of this.pending.values()) clearTimeout(timer);
-    this.pending.clear();
+    this.nextChatAt.clear();
     try {
       this.ai?.dispose();
     } catch (e) {
