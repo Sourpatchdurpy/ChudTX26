@@ -16,20 +16,17 @@ export interface PersonaDeps {
 
 /** Used only if even Part 2's fallbackPersona() throws or returns junk. */
 const LAST_RESORT_PERSONA: Persona = {
-  name: "Sam",
   age: 20,
   school: "UT Austin",
   year: "junior",
   major: "electrical and computer engineering",
   hometown: "San Antonio",
-  hackathonStory:
-    "came with two friends from ECE, building a study-group matcher, running on Round Rock Donuts and zero sleep",
   interests: ["Smash Bros", "bouldering", "lo-fi playlists"],
   opinions: ["breakfast tacos are a personality trait", "8am classes should be illegal"],
   facts: ["lives in West Campus", "has a roommate who never leaves the PCL"],
   thisWeek: ["went down the bouncy house slide in the GDC courtyard", "watched some of the Smash tournament"],
   style: { casing: "lowercase", emojiRate: 0.2, slang: ["lol", "ngl", "fr"], punctuation: "minimal" },
-  blurb: "Sam, junior ECE from San Antonio",
+  blurb: "junior ECE student from San Antonio",
 };
 
 export function makePrepareAiPersona(deps: PersonaDeps): PrepareAiPersona {
@@ -75,11 +72,11 @@ function safeFallback(deps: PersonaDeps): { persona: Persona; lastResort: boolea
 }
 
 /**
- * Null if the persona is unusable (no name, blurb or style). Otherwise a copy
+ * Null if the persona is unusable (no blurb or style; personas have no name). Otherwise a copy
  * with every array field forced to a string array, so prompt builders never crash.
  */
 function normalizePersona(raw: unknown): Persona | null {
-  if (!isRecord(raw) || !nonEmpty(raw.name) || !nonEmpty(raw.blurb) || !isRecord(raw.style)) return null;
+  if (!isRecord(raw) || !nonEmpty(raw.blurb) || !isRecord(raw.style)) return null;
   const p = raw as unknown as Persona;
   return {
     ...p,

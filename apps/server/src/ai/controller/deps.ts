@@ -1,29 +1,31 @@
 // What the controller needs from the outside world. Kept as an interface so the
-// controller never imports Part 2's module directly (createAiPlayer.ts wires the
-// real one) and tests can pass fakes.
-import type {
-  AiTurnContext, ChatMessage, MuseChatRequest, Persona,
-  PlayerId, RoundAnswer, StyleProfile, Tier,
-} from "@game/shared";
+// controller never imports Part 2's module at runtime (createAiPlayer.ts wires
+// the real one from root ai/) and tests can pass fakes.
+import type * as Part2 from "@game/ai";
 import type { MuseCallFn } from "../muse.js";
 
-/** Part 2's exports (docs/PART_2_AI_HUMANNESS.md §2) that the controller calls. */
-export interface HumannessDeps {
-  buildAnswerRequest(ctx: AiTurnContext): MuseChatRequest;
-  buildGroupChatRequest(ctx: AiTurnContext): MuseChatRequest;
-  buildPairChatRequest(ctx: AiTurnContext): MuseChatRequest;
-  buildCollabRequest(ctx: AiTurnContext): MuseChatRequest;
-  computeStyleProfile(messages: ChatMessage[], answers: RoundAnswer[], aiPlayerId: PlayerId): StyleProfile;
-  humanize(text: string, style: StyleProfile, persona: Persona): string;
-  validateOutput(text: string): { ok: true } | { ok: false; reason: string };
-  FALLBACK_LINES: {
-    answer: Record<Exclude<Tier, "collab">, string[]>;
-    collab: string[];
-    group: string[];
-    accused: string[];
-    pair: string[];
-  };
-}
+/** Part 2's exports the controller calls (docs/PART_2_DESIGN.md §3.1). */
+type Builders = Pick<
+  typeof Part2,
+  | "buildAnswerRequest"
+  | "buildGroupChatRequest"
+  | "buildPairChatRequest"
+  | "buildCollabRequest"
+  | "computeStyleProfile"
+  | "humanize"
+  | "validateOutput"
+  | "FALLBACK_LINES"
+>;
+
+/** Part 2's per-game memory (§2.3, §3.8). Optional: the builders derive it from the view when absent. */
+type MemoryHelpers = Pick<
+  typeof Part2,
+  "createSessionMemory" | "updateSessionMemory" | "recordAcceptedOutput" | "disposeSessionMemory"
+>;
+
+export type HumannessDeps = Builders & Partial<MemoryHelpers>;
+export type SessionMemory = Part2.SessionMemory;
+export type PlayerTurnContext = Part2.PlayerTurnContext;
 
 export interface ControllerDeps {
   humanness: HumannessDeps;

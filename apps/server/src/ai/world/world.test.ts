@@ -328,22 +328,20 @@ const WORLD: WorldContext = {
 };
 
 const GENERATED: Persona = {
-  name: "Zephyrine",
   age: 19,
   school: "UT Austin",
   year: "sophomore",
   major: "computer science",
   hometown: "Plano",
-  hackathonStory: "solo, building a fairytale map app",
   interests: ["chess"],
   opinions: ["tacodeli > everything"],
   facts: ["lives in Jester"],
   thisWeek: ["did the bouncy house"],
   style: { casing: "lowercase", emojiRate: 0.1, slang: ["lol"], punctuation: "minimal" },
-  blurb: "Zephyrine, sophomore CS from Plano",
+  blurb: "sophomore CS student from Plano",
 };
 
-const FALLBACK: Persona = { ...GENERATED, name: "Fallbacka", blurb: "Fallbacka, junior ECE from Waco" };
+const FALLBACK: Persona = { ...GENERATED, blurb: "junior ECE student from Waco" };
 
 const fakeCall: MuseCall = async <T>() => ({}) as T;
 
@@ -390,13 +388,13 @@ describe("makePrepareAiPersona", () => {
     assert.equal(counts.fallback, 0);
     assert.equal(logs.length, 1);
     assert.match(logs[0]!, /^\[ai ABCD\] persona ready in \d+ms \(generated\)$/);
-    assert.ok(!logs[0]!.includes("Zephyrine"));
+    assert.ok(!logs[0]!.includes(GENERATED.blurb));
   });
 
   test("generatePersona rejects → fallback", async () => {
     const { d, counts } = deps({ generatePersona: async () => Promise.reject(new SyntaxError("bad json")) });
     const p = await makePrepareAiPersona(d)({ roomCode: "ABCD" });
-    assert.equal(p.name, "Fallbacka");
+    assert.equal(p.blurb, FALLBACK.blurb);
     assert.equal(counts.fallback, 1);
     assert.match(logs[0]!, /\(fallback: SyntaxError\)$/);
   });
@@ -409,7 +407,7 @@ describe("makePrepareAiPersona", () => {
     // generatePersona never calls callFor's result here, but callFor still runs first.
     const started = Date.now();
     const p = await makePrepareAiPersona(d)({ roomCode: "ABCD" });
-    assert.equal(p.name, "Fallbacka");
+    assert.equal(p.blurb, FALLBACK.blurb);
     assert.ok(Date.now() - started < 1000);
     assert.equal(callForArgs[0]!.signal?.aborted, true);
     assert.match(logs[0]!, /\(fallback: TimeoutError\)$/);
@@ -420,7 +418,7 @@ describe("makePrepareAiPersona", () => {
     const ac = new AbortController();
     ac.abort();
     const p = await makePrepareAiPersona(d)({ roomCode: "ABCD", signal: ac.signal });
-    assert.equal(p.name, "Fallbacka");
+    assert.equal(p.blurb, FALLBACK.blurb);
     assert.deepEqual(counts, { world: 0, generate: 0, fallback: 1 });
     assert.match(logs[0]!, /\(fallback: AbortedError\)$/);
   });
@@ -434,13 +432,13 @@ describe("makePrepareAiPersona", () => {
       },
     });
     const p = await makePrepareAiPersona(d)({ roomCode: "ABCD", signal: ac.signal });
-    assert.equal(p.name, "Fallbacka");
+    assert.equal(p.blurb, FALLBACK.blurb);
     assert.equal(callForArgs[0]!.signal?.aborted, true);
   });
 
-  test("unusable persona (empty name, missing blurb, no style) → fallback", async () => {
+  test("unusable persona (empty or missing blurb, no style) → fallback", async () => {
     for (const bad of [
-      { ...GENERATED, name: "  " },
+      { ...GENERATED, blurb: "  " },
       { ...GENERATED, blurb: undefined },
       { ...GENERATED, style: null },
       null,
@@ -448,7 +446,7 @@ describe("makePrepareAiPersona", () => {
     ]) {
       const { d } = deps({ generatePersona: async () => bad as unknown as Persona });
       const p = await makePrepareAiPersona(d)({ roomCode: "ABCD" });
-      assert.equal(p.name, "Fallbacka");
+      assert.equal(p.blurb, FALLBACK.blurb);
     }
     assert.ok(logs.every((l) => l.endsWith("(fallback: unusable)")));
   });
@@ -464,7 +462,7 @@ describe("makePrepareAiPersona", () => {
     };
     const { d } = deps({ generatePersona: async () => partial as unknown as Persona });
     const p = await makePrepareAiPersona(d)({ roomCode: "ABCD" });
-    assert.equal(p.name, "Zephyrine");
+    assert.equal(p.blurb, GENERATED.blurb);
     assert.deepEqual(p.interests, []);
     assert.deepEqual(p.opinions, []);
     assert.deepEqual(p.facts, ["ok"]);
@@ -476,7 +474,7 @@ describe("makePrepareAiPersona", () => {
   test("getWorldContext rejecting → fallback", async () => {
     const { d, counts } = deps({ getWorldContext: async () => Promise.reject(new Error("x")) });
     const p = await makePrepareAiPersona(d)({ roomCode: "ABCD" });
-    assert.equal(p.name, "Fallbacka");
+    assert.equal(p.blurb, FALLBACK.blurb);
     assert.equal(counts.generate, 0);
   });
 
@@ -488,7 +486,7 @@ describe("makePrepareAiPersona", () => {
       },
     });
     const p = await makePrepareAiPersona(d)({ roomCode: "ABCD" });
-    assert.ok(p.name.length > 0 && p.blurb.length > 0);
+    assert.ok(p.blurb.length > 0);
     assert.ok(Array.isArray(p.interests) && Array.isArray(p.style.slang));
     assert.match(logs[0]!, /\(fallback: Error, last resort\)$/);
   });
@@ -519,17 +517,18 @@ describe("prepareAiPersona (wired)", () => {
     setMuseCallForTests(call as unknown as CallFn);
 
     const p = await prepareAiPersona({ roomCode: "WXYZ" });
-    assert.ok(typeof p.name === "string" && p.name.trim().length > 0);
+    assert.ok(Number.isInteger(p.age));
     assert.ok(typeof p.blurb === "string" && p.blurb.trim().length > 0);
     assert.equal(seen.length, 1, "one world-context call");
     assert.ok(callOpts.length >= 1, "persona generation went through Muse");
     for (const o of callOpts) assert.equal((o as { roomCode?: string }).roomCode, "WXYZ");
+    assert.ok(callOpts.every((o) => (o as { label?: string }).label === "persona"), "persona calls are labeled");
   });
 
   test("with Muse failing everywhere it still resolves with a persona", async () => {
     fakeResponses(() => Promise.reject(new Error("down")));
     setMuseCallForTests((async () => Promise.reject(new Error("down"))) as unknown as CallFn);
     const p = await prepareAiPersona({ roomCode: "WXYZ" });
-    assert.ok(p.name.trim().length > 0);
+    assert.ok(p.blurb.trim().length > 0);
   });
 });

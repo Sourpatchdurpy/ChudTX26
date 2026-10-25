@@ -5,8 +5,8 @@
 // the game: every Muse call has a timeout and every required action a fallback.
 import { DEFAULT_TIMERS, LIMITS } from "@game/shared";
 import type {
-  AiActions, AiMode, AiNoteView, AiPlayer, AiPlayerInit, AiTurnContext, Channel,
-  ChatMessage, GameEvent, Persona, Phase, PlayerId, RoomCode, RoomView, RoundNumber,
+  AckResult, AiActions, AiMode, AiNoteView, AiPlayer, AiPlayerInit, AiTurnContext, Channel,
+  ChatMessage, FirstQuestionAnswerSnapshot, GameEvent, Persona, Phase, PlayerId, RoomCode, RoomView, RoundNumber,
 } from "@game/shared";
 import type { MuseCallFn } from "../muse.js";
 import { median, oneLine, pick, sleep, truncateAtWord, uniform } from "../util.js";
@@ -15,7 +15,7 @@ import {
   classifyMessage, replyProbability, type Addressing,
 } from "./cadence.js";
 import { VOUCH_P, chooseFinalVote, chooseSuspicionVote, nicknameOf, voteNote, vouchNote } from "./decisions.js";
-import type { ControllerDeps, HumannessDeps } from "./deps.js";
+import type { ControllerDeps, HumannessDeps, PlayerTurnContext, SessionMemory } from "./deps.js";
 import { selectRevealNotes, type NoteKind, type NoteRecord } from "./notes.js";
 import {
   DEADLINE_GUARD_MS, MIN_GAP_MS, MIN_PHASE_LEFT_MS, STALE_AFTER_MESSAGES, computeSendAt, slotAt,
@@ -44,6 +44,10 @@ interface Slot {
   earlyAt: number | null;
   timer: Timer | null;
   result: GenResult | null;
+  /** Round 1 answer only: generation has started (it waits for every human's answer first). */
+  started?: boolean;
+  /** Round 1 answer only: generating at the reserve deadline without every human's answer. */
+  deadlineException?: boolean;
 }
 
 interface ChatRequest {
@@ -76,6 +80,12 @@ const MIN_CALL_MS = 1_500;
 const CHAT_RESERVE_MS = MIN_PHASE_LEFT_MS + 2_000;
 /** Answer / collab calls must finish a little before the deadline guard. */
 const SLOT_RESERVE_MS = DEADLINE_GUARD_MS + 500;
+/**
+ * Round 1: if some humans still haven't answered this long before the deadline
+ * guard, generate anyway with the answers we have (PART_2_DESIGN §2.7.1: baseline
+ * p90 generation time, 6s until measured).
+ */
+const FIRST_ANSWER_RESERVE_MS = 6_000;
 
 function museTimeoutMs(): number {
   return Number(process.env.MUSE_TIMEOUT_MS) || 12_000;
@@ -103,6 +113,7 @@ function parseOutput(mode: AiMode, raw: unknown): { skip: true } | { skip: false
 
 export class AiController implements AiPlayer {
   private readonly roomCode: RoomCode;
+  private readonly sessionGeneration: string;
   private readonly aiId: PlayerId;
   private readonly persona: Persona;
   private readonly actions: AiActions;
@@ -125,6 +136,10 @@ export class AiController implements AiPlayer {
   private noteSeq = 0;
   private readonly usedFallbacks = new Set<string>();
   private readonly seenMessages = new Set<string>();
+  /** Part 2's per-game memory; null if Part 2 doesn't provide it or it failed (builders then derive it). */
+  private memory: SessionMemory | null = null;
+  /** Newest private snapshot of the humans' round-1 answers (PART_2_DESIGN §3.8.1). */
+  private firstSnapshot: FirstQuestionAnswerSnapshot | null = null;
 
   // Per phase.
   private answer: Slot | null = null;
@@ -143,6 +158,7 @@ export class AiController implements AiPlayer {
 
   constructor(init: AiPlayerInit, deps: ControllerDeps) {
     this.roomCode = init.roomCode;
+    this.sessionGeneration = init.sessionGeneration;
     this.aiId = init.aiPlayerId;
     this.persona = init.persona;
     this.actions = init.actions;
@@ -159,8 +175,12 @@ export class AiController implements AiPlayer {
     try {
       this.view = view;
       this.clockOffset = this.now() - view.serverNow;
+      this.syncMemory(view);
       this.syncPhaseEnd(view);
       switch (event.type) {
+        case "firstQuestionAnswersUpdated":
+          this.onFirstQuestionSnapshot(event.snapshot);
+          break;
         case "gameStarted":
           if (!this.phase && view.phase !== "lobby") this.enterPhase(view.phase, view.round?.number ?? null, view);
           break;
@@ -182,11 +202,13 @@ export class AiController implements AiPlayer {
   }
 
   getRevealInfo(): { persona: { name: string; blurb: string }; notes: AiNoteView[] } {
+    // Personas have no name (PART_2_DESIGN §2.2): the reveal shows the AI's game nickname.
+    const name = this.myNickname() || "the AI";
     try {
-      return { persona: { name: this.persona.name, blurb: this.persona.blurb }, notes: selectRevealNotes(this.notes) };
+      return { persona: { name, blurb: this.persona.blurb }, notes: selectRevealNotes(this.notes) };
     } catch (err) {
       this.log("getRevealInfo failed", err);
-      return { persona: { name: this.persona?.name ?? "the AI", blurb: "" }, notes: [] };
+      return { persona: { name, blurb: "" }, notes: [] };
     }
   }
 
@@ -195,11 +217,103 @@ export class AiController implements AiPlayer {
     this.clearPhase();
     this.disposed = true;
     this.pendingChat = null;
+    this.firstSnapshot = null;
+    try {
+      if (this.memory) this.h.disposeSessionMemory?.(this.memory);
+    } catch {
+      // memory is in-process only; nothing to recover
+    }
+    this.memory = null;
     try {
       this.logRoomStats?.(this.roomCode);
     } catch {
       // stats are best effort
     }
+  }
+
+  // ── Part 2 memory and the private round-1 feed ───────────────────────────
+
+  /** Keep Part 2's session memory in step with what the AI can see. On any failure, run without it. */
+  private syncMemory(view: RoomView): void {
+    const h = this.h;
+    if (!h.createSessionMemory || !h.updateSessionMemory) return;
+    try {
+      if (!this.memory) {
+        if (view.players.length === 0) return;
+        this.memory = h.createSessionMemory(this.sessionGeneration, view.players);
+      }
+      h.updateSessionMemory(this.memory, view, this.aiId);
+    } catch (err) {
+      this.log("session memory failed, continuing without it", err);
+      this.memory = null;
+    }
+  }
+
+  /** Record an accepted action in Part 2's memory, so later turns stay consistent with it. */
+  private remember(
+    mode: AiMode,
+    text: string,
+    note: string,
+    ack: AckResult<{ messageId?: string; visibleAt?: number }>,
+  ): void {
+    const round = this.view?.round;
+    if (!this.memory || !this.h.recordAcceptedOutput || !round || !ack.ok) return;
+    const messageId = ack.messageId;
+    try {
+      this.h.recordAcceptedOutput(this.memory, ack, {
+        key: `${this.sessionGeneration}:${round.number}:${mode}:${messageId ?? "submission"}`,
+        text,
+        mode,
+        round: round.number,
+        promptId: round.promptId,
+        question: round.prompt,
+        messageId,
+        visibleAt: ack.visibleAt,
+        visibility: messageId ? "pending" : "visible",
+        note,
+      });
+    } catch (err) {
+      this.log("recording accepted output failed", err);
+    }
+  }
+
+  /** Server-only snapshot of the humans' submitted round-1 answers. Keep the newest valid one. */
+  private onFirstQuestionSnapshot(snapshot: FirstQuestionAnswerSnapshot): void {
+    const p = this.phase;
+    const round = this.view?.round;
+    if (!p || p.phase !== "answer" || p.round !== 1 || !round) return;
+    if (
+      snapshot.round !== 1 ||
+      snapshot.sessionGeneration !== this.sessionGeneration ||
+      snapshot.promptId !== round.promptId
+    ) {
+      return this.log("ignored a round-1 snapshot for another game or question");
+    }
+    if (this.firstSnapshot && snapshot.revision <= this.firstSnapshot.revision) return;
+    this.firstSnapshot = snapshot;
+    this.maybeStartFirstAnswer();
+  }
+
+  /** Round 1 waits for every human's answer, then generates from them (PART_2_DESIGN §2.7.1). */
+  private maybeStartFirstAnswer(): void {
+    const s = this.firstSnapshot;
+    if (s && s.humanPlayerIds.length > 0 && s.submittedCount >= s.humanPlayerIds.length) this.startFirstAnswer(false);
+  }
+
+  private startFirstAnswer(deadlineException: boolean): void {
+    const slot = this.answer;
+    const p = this.phase;
+    if (!slot || !p || slot.done || slot.started) return;
+    slot.started = true;
+    slot.deadlineException = deadlineException;
+    if (deadlineException) this.log("r1 answer: generating at the reserve deadline without every human's answer");
+    void this.generate("answer", { kind: "phaseStart" }, false, p.key, SLOT_RESERVE_MS)
+      .then((result) => {
+        if (!this.isCurrent(p.key)) return;
+        slot.result = result;
+        this.maybeSubmitAnswer();
+      })
+      .catch((err: unknown) => this.log("answer task failed", err));
   }
 
   // ── Phases ────────────────────────────────────────────────────────────────
@@ -254,6 +368,18 @@ export class AiController implements AiPlayer {
     this.armGuard(() => {
       if (!slot.done) this.submitAnswer(slot, this.answerFallback(), "deadline");
     });
+    if (p.round === 1) {
+      // Round 1 (PART_2_DESIGN §2.7.1): wait for every human's answer via the private
+      // snapshot, generate from them, and submit as soon as the answer is ready. If
+      // someone is still typing near the end, generate anyway with what we have.
+      slot.slotAt = p.startedAt;
+      this.firstSnapshot = null;
+      if (p.endsAt != null) {
+        this.at(p.endsAt - DEADLINE_GUARD_MS - FIRST_ANSWER_RESERVE_MS, () => this.startFirstAnswer(true));
+      }
+      this.maybeStartFirstAnswer();
+      return;
+    }
     void this.generate("answer", { kind: "phaseStart" }, false, p.key, SLOT_RESERVE_MS)
       .then((result) => {
         if (!this.isCurrent(p.key)) return;
@@ -293,6 +419,7 @@ export class AiController implements AiPlayer {
     this.cancel(slot.timer);
     this.saidSoFar.push(text);
     this.myAnswers.push(text);
+    this.remember("answer", text, answer.note, res);
     this.addNote("answer", answer.note, round);
     this.log(`r${round ?? "?"} answer submitted (${source}) at ${pct}%`);
   }
@@ -379,6 +506,7 @@ export class AiController implements AiPlayer {
       return;
     }
     this.saidSoFar.push(text);
+    this.remember("collab", text, collab.note, res);
     this.addNote("collab", collab.note, round);
     this.log(`collab result submitted (${source})`);
   }
@@ -502,6 +630,7 @@ export class AiController implements AiPlayer {
     if (!res.ok) return this.log(`${req.channel} message rejected (${res.error})`);
     this.lastSentAt[req.channel] = this.now();
     this.saidSoFar.push(text);
+    this.remember(req.channel, text, note, res);
     if (req.channel === "group") {
       this.myGroupCount++;
       this.addNote("discuss", note, round, req.accused);
@@ -527,10 +656,12 @@ export class AiController implements AiPlayer {
       if (!p || !this.isCurrent(key)) return { kind: "failed", reason: "phase over" };
       const timeoutMs = Math.min(museTimeoutMs(), this.msLeft() - reserveMs);
       if (timeoutMs < MIN_CALL_MS) return { kind: "failed", reason };
+      // Absolute cutoff for this call, retry included (PART_2_DESIGN §3.2.1).
+      const deadlineAtMs = p.endsAt == null ? undefined : p.endsAt - reserveMs;
       try {
-        const ctx = this.buildCtx(mode, trigger, addressed);
+        const ctx = this.buildCtx(mode, trigger, addressed, deadlineAtMs);
         const raw = await this.call<unknown>(this.builderFor(mode)(ctx), {
-          label: mode, timeoutMs, signal: p.ac.signal, roomCode: this.roomCode,
+          label: mode, timeoutMs, deadlineAtMs, signal: p.ac.signal, roomCode: this.roomCode,
         });
         if (!this.isCurrent(key)) return { kind: "failed", reason: "phase over" };
         const out = parseOutput(mode, raw);
@@ -538,7 +669,12 @@ export class AiController implements AiPlayer {
           reason = "malformed output";
           continue;
         }
-        if (out.skip) return { kind: "skip" };
+        if (out.skip) {
+          if (!addressed) return { kind: "skip" };
+          // Someone talked to the AI directly: skipping isn't allowed (PART_2_DESIGN §2.7.2).
+          reason = "skipped a turn addressed to it";
+          continue;
+        }
         const text = truncateAtWord(oneLine(this.h.humanize(out.text, ctx.style, this.persona)), MODE_LIMITS[mode]);
         const verdict = text ? this.h.validateOutput(text) : ({ ok: false, reason: "empty" } as const);
         if (verdict.ok) return { kind: "text", text, note: out.note };
@@ -552,7 +688,7 @@ export class AiController implements AiPlayer {
     return { kind: "failed", reason };
   }
 
-  private builderFor(mode: AiMode): (ctx: AiTurnContext) => ReturnType<HumannessDeps["buildAnswerRequest"]> {
+  private builderFor(mode: AiMode): (ctx: PlayerTurnContext) => ReturnType<HumannessDeps["buildAnswerRequest"]> {
     switch (mode) {
       case "answer": return (ctx) => this.h.buildAnswerRequest(ctx);
       case "group": return (ctx) => this.h.buildGroupChatRequest(ctx);
@@ -561,10 +697,17 @@ export class AiController implements AiPlayer {
     }
   }
 
-  private buildCtx(mode: AiMode, trigger: Trigger, addressed: boolean): AiTurnContext {
+  private buildCtx(mode: AiMode, trigger: Trigger, addressed: boolean, cutoffAt?: number): PlayerTurnContext {
     const view = this.view!;
     const answers = view.history.flatMap((r) => r.answers);
+    const firstQuestion = mode === "answer" && this.phase?.round === 1;
     return {
+      // Part 2's extensions (PART_2_DESIGN §2.3): memory, the round-1 snapshot and the cutoff.
+      memory: this.memory ?? undefined,
+      firstQuestionHumanAnswers: firstQuestion ? (this.firstSnapshot ?? undefined) : undefined,
+      firstQuestionDeadlineException: firstQuestion ? Boolean(this.answer?.deadlineException) : undefined,
+      generationCutoffAt: cutoffAt,
+      nowMs: this.now(),
       mode,
       persona: this.persona,
       view,

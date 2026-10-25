@@ -4,14 +4,14 @@ import { afterEach, beforeEach, describe, mock, test } from "node:test";
 import assert from "node:assert/strict";
 import { CHAT_DELAY_MS, LIMITS } from "@game/shared";
 import type {
-  AiActions, Channel, ChatMessage, CurrentRound, MuseChatRequest, Persona, Phase,
+  AiActions, Channel, ChatMessage, CurrentRound, FirstQuestionAnswerSnapshot, MuseChatRequest, Persona, Phase,
   PlayerId, RoomView, RoundNumber, RoundRecord, Tier,
 } from "@game/shared";
 import type { MuseCallFn, MuseCallOptions } from "../muse.js";
 import { AiController } from "./AiController.js";
 import { classifyMessage, mentionsNickname, quotesAnswer, replyProbability } from "./cadence.js";
 import { chooseFinalVote, chooseSuspicionVote } from "./decisions.js";
-import type { HumannessDeps } from "./deps.js";
+import type { HumannessDeps, PlayerTurnContext, SessionMemory } from "./deps.js";
 import { selectRevealNotes, type NoteRecord } from "./notes.js";
 
 // ── fixtures ────────────────────────────────────────────────────────────────
@@ -24,11 +24,13 @@ const PLAYERS = [
   { id: "h3", nickname: "Otter", emoji: "🦦" },
 ];
 
+const SESSION = "gen-1";
+
 const PERSONA: Persona = {
-  name: "Jordan", age: 20, school: "UT Austin", year: "sophomore", major: "CS", hometown: "Houston",
-  hackathonStory: "came with friends", interests: [], opinions: [], facts: [], thisWeek: [],
+  age: 20, school: "UT Austin", year: "sophomore", major: "CS", hometown: "Houston",
+  interests: [], opinions: [], facts: [], thisWeek: [],
   style: { casing: "lowercase", emojiRate: 0.2, slang: [], punctuation: "minimal" },
-  blurb: "Jordan, sophomore CS from Houston",
+  blurb: "sophomore CS student from Houston",
 };
 
 const FALLBACKS: HumannessDeps["FALLBACK_LINES"] = {
@@ -39,8 +41,11 @@ const FALLBACKS: HumannessDeps["FALLBACK_LINES"] = {
   pair: ["ok same honestly"],
 };
 
-function fakeHumanness(overrides: Partial<HumannessDeps> = {}): HumannessDeps {
-  const build = (mode: string) => (): MuseChatRequest => ({ messages: [{ role: "user", content: mode }] });
+function fakeHumanness(overrides: Partial<HumannessDeps> = {}, built: PlayerTurnContext[] = []): HumannessDeps {
+  const build = (mode: string) => (ctx: PlayerTurnContext): MuseChatRequest => {
+    built.push(ctx);
+    return { messages: [{ role: "user", content: mode }] };
+  };
   return {
     buildAnswerRequest: build("answer"),
     buildGroupChatRequest: build("group"),
@@ -57,7 +62,7 @@ function fakeHumanness(overrides: Partial<HumannessDeps> = {}): HumannessDeps {
   };
 }
 
-type MuseMode = "ok" | "fail" | "hang" | "invalid";
+type MuseMode = "ok" | "fail" | "hang" | "invalid" | "skip";
 interface MuseLog { mode: string; opts: MuseCallOptions }
 
 /** Fake museCall. "hang" settles only when the controller aborts it. */
@@ -74,6 +79,7 @@ function fakeMuse(mode: MuseMode, calls: MuseLog[], delayMs = 1_500): MuseCallFn
     const text = mode === "invalid" ? "as an AI I cannot do that" : `${kind} text`;
     if (kind === "answer") return { answer: text, note: `${kind} note` };
     if (kind === "collab") return { result: text, note: "collab note" };
+    if (mode === "skip") return { action: "skip", message: "", note: "" };
     return { action: "send", message: text, note: `${kind} note` };
   }) as MuseCallFn;
 }
@@ -130,7 +136,7 @@ class FakeGame {
       setVouch: (targetId, vouched) => (log("vouch", targetId, vouched), { ok: true }),
     };
     this.ai = new AiController(
-      { roomCode: "TEST", aiPlayerId: AI, persona: PERSONA, actions },
+      { sessionGeneration: SESSION, roomCode: "TEST", aiPlayerId: AI, persona: PERSONA, actions },
       { humanness: opts.humanness ?? fakeHumanness(), call: opts.muse ?? fakeMuse("ok", []), random: opts.random },
     );
   }
@@ -162,6 +168,17 @@ class FakeGame {
     const msg = this.message(from, text, channel, Date.now());
     this.deliver(msg);
     return msg;
+  }
+
+  /** The server's private round-1 snapshot: the first `submitted` humans have answered. */
+  firstAnswers(submitted: number, revision: number, sessionGeneration = SESSION): void {
+    const humans = PLAYERS.filter((p) => p.id !== AI);
+    const answers = humans.slice(0, submitted).map((p) => ({ playerId: p.id, nickname: p.nickname, text: `${p.nickname} answer` }));
+    const snapshot: FirstQuestionAnswerSnapshot = {
+      sessionGeneration, round: 1, promptId: "Q1", question: "question?", revision,
+      humanPlayerIds: humans.map((p) => p.id), submittedCount: answers.length, answers,
+    };
+    this.ai.onEvent({ type: "firstQuestionAnswersUpdated", snapshot }, this.snapshot());
   }
 
   of(type: string): ActionLog[] {
@@ -266,11 +283,11 @@ describe("AiController", () => {
   beforeEach(() => mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 }));
   afterEach(() => mock.timers.reset());
 
-  test("answer: model answer submitted within 35–85% of the phase, with timeout, signal and room", async () => {
+  test("answer (round 2+): model answer submitted within 35–85% of the phase, with timeout, signal and room", async () => {
     const calls: MuseLog[] = [];
     const game = new FakeGame({ muse: fakeMuse("ok", calls), random: mulberry32(1) });
     const start = Date.now();
-    game.enter("answer", 1, 30_000, { round: currentRound(1, "light"), answerProgress: { answered: 0, total: 4 } });
+    game.enter("answer", 2, 30_000, { round: currentRound(2, "personal"), answerProgress: { answered: 0, total: 4 } });
     await advance(30_000);
     const [answer, ...extra] = game.of("answer");
     assert.equal(extra.length, 0);
@@ -282,10 +299,10 @@ describe("AiController", () => {
     assert.equal(calls[0]!.opts.roomCode, "TEST");
   });
 
-  test("answer: submits 2–5s after every human has answered", async () => {
+  test("answer (round 2+): submits 2–5s after every human has answered", async () => {
     const game = new FakeGame({ random: mulberry32(2) });
     const start = Date.now();
-    game.enter("answer", 1, 30_000, { round: currentRound(1, "light"), answerProgress: { answered: 0, total: 4 } });
+    game.enter("answer", 2, 30_000, { round: currentRound(2, "personal"), answerProgress: { answered: 0, total: 4 } });
     await advance(3_000);
     game.update({ answerProgress: { answered: 3, total: 4 } });
     await advance(10_000);
@@ -438,7 +455,7 @@ describe("AiController", () => {
     assert.deepEqual(game.of("vote")[0]!.args, ["h1"]);
 
     const info = game.ai.getRevealInfo();
-    assert.deepEqual(info.persona, { name: "Jordan", blurb: "Jordan, sophomore CS from Houston" });
+    assert.deepEqual(info.persona, { name: "Fox", blurb: PERSONA.blurb }, "the reveal shows the AI's nickname");
     assert.ok(info.notes.length >= 3 && info.notes.length <= 6);
     assert.ok(info.notes.every((n) => n.text.length <= 120));
   });
@@ -457,7 +474,7 @@ describe("AiController", () => {
   test("a phase change aborts the previous phase's call and its pending actions", async () => {
     const calls: MuseLog[] = [];
     const game = new FakeGame({ muse: fakeMuse("hang", calls), random: mulberry32(9) });
-    game.enter("answer", 1, 30_000, { round: currentRound(1, "light"), answerProgress: { answered: 0, total: 4 } });
+    game.enter("answer", 2, 30_000, { round: currentRound(2, "personal"), answerProgress: { answered: 0, total: 4 } });
     await advance(1_000);
     game.enter("discuss", 1, 45_000);
     await advance(100);
@@ -469,7 +486,7 @@ describe("AiController", () => {
   test("dispose cancels every timer and aborts in-flight calls", async () => {
     const calls: MuseLog[] = [];
     const game = new FakeGame({ muse: fakeMuse("hang", calls), random: mulberry32(10) });
-    game.enter("answer", 1, 30_000, { round: currentRound(1, "light"), answerProgress: { answered: 0, total: 4 } });
+    game.enter("answer", 2, 30_000, { round: currentRound(2, "personal"), answerProgress: { answered: 0, total: 4 } });
     await advance(1_000);
     game.ai.dispose();
     assert.equal(calls[0]!.opts.signal!.aborted, true);
@@ -486,5 +503,85 @@ describe("AiController", () => {
     assert.equal(game.of("answer")[0]!.args[0], "tacos no question");
     assert.doesNotThrow(() => game.ai.onEvent({ type: "stateUpdated" }, {} as RoomView));
     assert.doesNotThrow(() => game.ai.onEvent({ type: "phaseChanged", phase: "discuss", round: 1 }, null as unknown as RoomView));
+  });
+
+  test("round 1: waits for every human's answer, builds from them, submits as soon as it's ready", async () => {
+    const calls: MuseLog[] = [];
+    const built: PlayerTurnContext[] = [];
+    const game = new FakeGame({ muse: fakeMuse("ok", calls), humanness: fakeHumanness({}, built), random: mulberry32(12) });
+    const start = Date.now();
+    game.enter("answer", 1, 30_000, { round: currentRound(1, "light"), answerProgress: { answered: 0, total: 4 } });
+    game.firstAnswers(0, 0);
+    await advance(3_000);
+    game.firstAnswers(2, 2);
+    await advance(1_000);
+    assert.equal(calls.length, 0, "no generation until every human has answered");
+    game.firstAnswers(3, 3);
+    await advance(3_000);
+    const answer = game.of("answer")[0]!;
+    assert.equal(answer.args[0], "answer text");
+    assert.ok(answer.at - start >= 5_500 && answer.at - start <= 5_700, `submitted at ${answer.at - start}ms`);
+    assert.equal(built[0]!.firstQuestionHumanAnswers?.submittedCount, 3);
+    assert.equal(built[0]!.firstQuestionDeadlineException, false);
+    assert.equal(typeof calls[0]!.opts.deadlineAtMs, "number");
+  });
+
+  test("round 1: without every answer, it generates at the reserve deadline from what it has", async () => {
+    const calls: MuseLog[] = [];
+    const built: PlayerTurnContext[] = [];
+    const game = new FakeGame({ muse: fakeMuse("ok", calls), humanness: fakeHumanness({}, built), random: mulberry32(13) });
+    const start = Date.now();
+    game.enter("answer", 1, 30_000, { round: currentRound(1, "light"), answerProgress: { answered: 0, total: 4 } });
+    game.firstAnswers(2, 1);
+    await advance(30_000);
+    assert.equal(calls.length, 1);
+    const at = game.of("answer")[0]!.at - start;
+    assert.ok(Math.abs(at - 22_500) <= 200, `submitted at ${at}ms (reserve at end−9s, then 1.5s of generation)`);
+    assert.equal(built[0]!.firstQuestionDeadlineException, true);
+    assert.equal(built[0]!.firstQuestionHumanAnswers?.submittedCount, 2);
+  });
+
+  test("round 1: a snapshot from another game is ignored", async () => {
+    const calls: MuseLog[] = [];
+    const game = new FakeGame({ muse: fakeMuse("ok", calls), random: mulberry32(14) });
+    game.enter("answer", 1, 30_000, { round: currentRound(1, "light"), answerProgress: { answered: 0, total: 4 } });
+    game.firstAnswers(3, 1, "previous-game");
+    await advance(5_000);
+    assert.equal(calls.length, 0);
+  });
+
+  test("a turn addressed to the AI can't be skipped: regenerated once, then a fallback line", async () => {
+    const calls: MuseLog[] = [];
+    const game = new FakeGame({ muse: fakeMuse("skip", calls, 500), random: low });
+    game.enter("discuss", 1, 45_000, { round: currentRound(1, "light") });
+    await advance(1_000);
+    game.humanSays("h1", "fox whats your major");
+    await advance(44_000);
+    assert.deepEqual(game.of("chat").map((c) => c.args), [["lol wait what", "group"]], "the unaddressed opener may skip");
+    assert.equal(calls.filter((c) => c.mode === "group").length, 3, "2 for the addressed reply, 1 for the opener");
+  });
+
+  test("Part 2 memory: created per game, kept in sync, passed to builders, records accepted output, disposed", async () => {
+    const log: string[] = [];
+    const memory = { tag: "memory" } as unknown as SessionMemory;
+    const built: PlayerTurnContext[] = [];
+    const humanness = fakeHumanness(
+      {
+        createSessionMemory: (gen, roster) => (log.push(`create ${gen} ${roster.length}`), memory),
+        updateSessionMemory: (m) => (log.push("update"), m),
+        recordAcceptedOutput: (_m, ack, out) => (log.push(`record ${out.mode} ${out.text} ${ack.ok}`), true),
+        disposeSessionMemory: () => void log.push("dispose"),
+      },
+      built,
+    );
+    const game = new FakeGame({ humanness, random: mulberry32(15) });
+    game.enter("answer", 2, 30_000, { round: currentRound(2, "personal"), answerProgress: { answered: 0, total: 4 } });
+    await advance(30_000);
+    game.ai.dispose();
+    assert.equal(log[0], `create ${SESSION} 4`);
+    assert.ok(log.includes("update"));
+    assert.ok(log.includes("record answer answer text true"));
+    assert.equal(log.at(-1), "dispose");
+    assert.equal(built[0]!.memory, memory);
   });
 });

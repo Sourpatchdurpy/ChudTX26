@@ -10,6 +10,8 @@ import { AbortedError, TimeoutError, oneLine, truncateAtWord } from "./util.js";
 const BASE_URL = "https://api.meta.ai/v1";
 const DEFAULT_MODEL = "muse-spark-1.3";
 const MAX_COMPLETION_TOKENS = 1000;
+/** A retry starts only with at least this long left before the caller's deadline (PART_2_DESIGN §3.2.1). */
+const MIN_RETRY_MS = 1000;
 /** Persona generation (label "persona") runs once per game in the lobby and needs room for reasoning plus a big JSON. */
 const PERSONA_MAX_COMPLETION_TOKENS = 2000;
 const RATE_WINDOW_MS = 60_000;
@@ -25,6 +27,8 @@ export interface MuseCallOptions {
   label?: string;
   /** External abort (dispose / phase change). Never retried. */
   signal?: AbortSignal;
+  /** Absolute cutoff (Date.now() clock) for the whole call, retry included: each attempt's timeout shrinks to fit. */
+  deadlineAtMs?: number;
   /** Per-room stats; falls back to req.prompt_cache_key. */
   roomCode?: string;
 }
@@ -78,8 +82,15 @@ function envNumber(name: string, fallback: number, min: number): number {
   return fallback;
 }
 const defaultTimeoutMs = () => envNumber("MUSE_TIMEOUT_MS", 12_000, 1);
-/** 0 blocks every call. */
-const budgetUsd = () => envNumber("MUSE_BUDGET_USD", 5, 0);
+/** 0 blocks every call. "disabled" turns the dollar cap off on purpose (rate cap and cost logging stay on). */
+function budgetUsd(): number {
+  if (process.env.MUSE_BUDGET_USD?.trim().toLowerCase() === "disabled") {
+    warnOnce("budget:disabled", "[muse] MUSE_BUDGET_USD=disabled: no dollar cap. Rate cap and cost logging stay on.");
+    return Infinity;
+  }
+  return envNumber("MUSE_BUDGET_USD", 5, 0);
+}
+const budgetLabel = () => (Number.isFinite(budgetUsd()) ? String(budgetUsd()) : "no cap");
 /** 0 blocks every call. */
 const maxCallsPerMin = () => envNumber("MUSE_MAX_CALLS_PER_MIN", 60, 0);
 
@@ -183,7 +194,7 @@ export function logRoomMuseStats(roomCode: string): void {
   console.log(
     `[muse] room=${roomCode} summary: ${s.calls} calls (${s.failures} failed) ` +
       `in=${s.promptTokens}(cached ${s.cachedTokens}) out=${s.completionTokens}(reasoning ${s.reasoningTokens})` +
-      `${s.searches ? ` searches=${s.searches}` : ""} ~$${s.costUsd.toFixed(4)} | process total=$${totals.costUsd.toFixed(3)}/${budgetUsd()}`,
+      `${s.searches ? ` searches=${s.searches}` : ""} ~$${s.costUsd.toFixed(4)} | process total=$${totals.costUsd.toFixed(3)}/${budgetLabel()}`,
   );
 }
 
@@ -295,10 +306,16 @@ interface Endpoint<T> {
 }
 
 async function runGuarded<T>(ep: Endpoint<T>, label: string, room: string, opts: MuseCallOptions): Promise<T> {
-  const timeoutMs = opts.timeoutMs !== undefined && opts.timeoutMs > 0 ? opts.timeoutMs : defaultTimeoutMs();
+  const configuredTimeoutMs = opts.timeoutMs !== undefined && opts.timeoutMs > 0 ? opts.timeoutMs : defaultTimeoutMs();
+  const deadline = opts.deadlineAtMs !== undefined && Number.isFinite(opts.deadlineAtMs) ? opts.deadlineAtMs : Infinity;
   const tag = `[muse] ${label} room=${room}`;
   for (let attempt = 1; ; attempt++) {
     if (opts.signal?.aborted) throw new AbortedError(`muse ${label} aborted`);
+    const remaining = deadline - Date.now();
+    if (remaining <= 0 || (attempt > 1 && remaining < MIN_RETRY_MS)) {
+      throw new TimeoutError(`muse ${label} reached its deadline`);
+    }
+    const timeoutMs = Math.min(configuredTimeoutMs, remaining);
     checkBudget();
     const client = getClient();
     takeRateSlot();
@@ -327,8 +344,8 @@ async function runGuarded<T>(ep: Endpoint<T>, label: string, room: string, opts:
               ? `${status}: ${errorDetail(err)}` // a bad request we need to see
               : `error: ${errorDetail(err)}`;
       console.warn(`${tag} FAILED ${ms}ms ${why}${retry ? " (retrying)" : ""}`);
-      if (retry) continue; // budget, key and rate cap are re-checked at the top
-      if (timedOut) throw new TimeoutError(`muse ${label} timed out after ${timeoutMs}ms (twice)`);
+      if (retry) continue; // deadline, budget, key and rate cap are re-checked at the top
+      if (timedOut) throw new TimeoutError(`muse ${label} timed out after ${timeoutMs}ms`);
       throw err;
     }
 
@@ -347,7 +364,7 @@ async function runGuarded<T>(ep: Endpoint<T>, label: string, room: string, opts:
     console.log(
       `${tag} ${ms}ms in=${u.estimated ? "~" : ""}${u.promptTokens}${u.cachedTokens ? `(cached ${u.cachedTokens})` : ""} ` +
         `out=${u.estimated ? "~" : ""}${u.completionTokens}${u.reasoningTokens ? `(reasoning ${u.reasoningTokens})` : ""}` +
-        `${u.searches ? ` searches=${u.searches}` : ""} ~$${cost.toFixed(4)} total=$${totals.costUsd.toFixed(3)}/${budgetUsd()}`,
+        `${u.searches ? ` searches=${u.searches}` : ""} ~$${cost.toFixed(4)} total=$${totals.costUsd.toFixed(3)}/${budgetLabel()}`,
     );
     try {
       return ep.parse(res);

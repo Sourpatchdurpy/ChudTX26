@@ -244,6 +244,45 @@ describe("budget cap", () => {
     await assert.rejects(museCall(req()), BudgetExceededError);
     assert.equal(fake.chat.length, 0);
   });
+
+  test("MUSE_BUDGET_USD=disabled turns the dollar cap off on purpose, with one warning; costs are still logged", async () => {
+    process.env.MUSE_BUDGET_USD = "disabled";
+    const fake = installFake([ok({ a: 1 }, usage(1_000_000, 0, 1_000_000, 0))]); // $5.50 per call
+    await museCall(req());
+    await museCall(req());
+    assert.equal(fake.chat.length, 2);
+    assert.equal(logs.filter((l) => l.includes("no dollar cap")).length, 1);
+    assert.ok(logs.some((l) => l.includes("/no cap")), "cost lines still print");
+    assert.ok(getMuseStats().costUsd > 10);
+  });
+});
+
+describe("deadline (deadlineAtMs)", () => {
+  test("a deadline that already passed makes no call", async () => {
+    const fake = installFake([ok({ a: 1 })]);
+    await assert.rejects(museCall(req(), { deadlineAtMs: Date.now() - 1 }), TimeoutError);
+    assert.equal(fake.chat.length, 0);
+  });
+
+  test("the attempt timeout shrinks to the deadline, and a timeout at the deadline isn't retried", async () => {
+    const fake = installFake([hang]);
+    const started = Date.now();
+    await assert.rejects(museCall(req(), { timeoutMs: 5_000, deadlineAtMs: Date.now() + 60 }), TimeoutError);
+    assert.equal(fake.chat.length, 1);
+    assert.ok(Date.now() - started < 1_000);
+  });
+
+  test("a 429 isn't retried with under 1s left before the deadline", async () => {
+    const fake = installFake([fail(429), ok({ a: 1 })]);
+    await assert.rejects(museCall(req(), { deadlineAtMs: Date.now() + 500 }), TimeoutError);
+    assert.equal(fake.chat.length, 1);
+  });
+
+  test("with enough time left, the single retry still happens", async () => {
+    const fake = installFake([fail(429), ok({ a: 1 })]);
+    assert.deepEqual(await museCall(req(), { deadlineAtMs: Date.now() + 5_000 }), { a: 1 });
+    assert.equal(fake.chat.length, 2);
+  });
 });
 
 describe("rate cap", () => {
