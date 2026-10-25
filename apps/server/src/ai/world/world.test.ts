@@ -55,7 +55,7 @@ function captureLogs(): void {
 
 const GOOD = {
   trending: ["new Zelda trailer", "Astros in the playoffs"],
-  news: ["Senate passes budget bill"],
+  news: ["Nintendo teases a new console"],
   local: ["Texas beat OU", "ACL lineup rumors"],
   weather: "low 80s and humid",
 };
@@ -103,7 +103,7 @@ describe("getWorldContext", () => {
         "f",
         "g",
       ],
-      news: ["Senate passes budget bill https://news.example.com/a"],
+      news: ["Nintendo teases a new console https://news.example.com/a"],
       local: "not an array",
       weather: "w".repeat(30) + " " + "x".repeat(30) + " " + "y".repeat(30),
     }));
@@ -141,7 +141,7 @@ describe("getWorldContext", () => {
     assert.ok(ctx.trending[1]!.startsWith("word word") && ctx.trending[1]!.length <= 120, "truncated");
     assert.equal(ctx.trending[2], "Astros win", "citation stripped");
     assert.equal(ctx.trending[3], "see this meme everywhere", "link label kept");
-    assert.deepEqual(ctx.news, ["Senate passes budget bill"]);
+    assert.deepEqual(ctx.news, ["Nintendo teases a new console"]);
     assert.deepEqual(ctx.local, []);
     assert.ok(ctx.weather && ctx.weather.length <= 80);
     assert.deepEqual(ctx.hacktx, HACKTX_FACTS);
@@ -150,6 +150,20 @@ describe("getWorldContext", () => {
     // One log line, counts only.
     assert.equal(logs.length, 1);
     assert.match(logs[0]!, /^\[world\] refreshed in \d+ms \(8 trending, 1 news, 0 local, weather yes\)$/);
+  });
+
+  test("asks for light topics only and drops political or heavy items that slip through", async () => {
+    fakeResponses(() => ({
+      trending: ["Taylor Swift album at #1", "Star Wars trailer drops", "Midterms Nov 3, early votes cast"],
+      news: ["Trump cutting Canada tariffs", "Judge limits voting probes in 9 states", "Wemby game-winning shot"],
+      local: ["Texas vs Ole Miss at DKR", "Senate race heats up in Austin"],
+      weather: "sunny, mid 80s",
+    }));
+    const ctx = await getWorldContext();
+    assert.match(String(seen[0]!.body.input), /Nothing about politics, elections, crime, disasters/);
+    assert.deepEqual(ctx.trending, ["Taylor Swift album at #1", "Star Wars trailer drops"]);
+    assert.deepEqual(ctx.news, ["Wemby game-winning shot"]);
+    assert.deepEqual(ctx.local, ["Texas vs Ole Miss at DKR"]);
   });
 
   test("accepts a JSON string or a raw Responses object with output_text", async () => {

@@ -399,6 +399,16 @@ describe("clamps", () => {
     assert.equal(logs.filter((l) => l.includes("clamped to 1000")).length, 1, "one-time warning");
     assert.equal(logs.filter((l) => l.includes("downgraded to medium")).length, 1, "one-time warning");
   });
+
+  test('label "persona" may use up to 2000 completion tokens; everything else stays at 1000', async () => {
+    const fake = installFake([ok({ a: 1 })]);
+    await museCall(req({ max_completion_tokens: 1800 }), { label: "persona" });
+    await museCall(req({ max_completion_tokens: 5000 }), { label: "persona" });
+    await museCall(req({ max_completion_tokens: 1800 }), { label: "group" });
+    assert.equal(fake.chat[0]!.body.max_completion_tokens, 1800);
+    assert.equal(fake.chat[1]!.body.max_completion_tokens, 2000);
+    assert.equal(fake.chat[2]!.body.max_completion_tokens, 1000);
+  });
 });
 
 describe("missing key", () => {

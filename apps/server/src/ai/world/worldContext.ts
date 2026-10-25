@@ -142,10 +142,12 @@ async function fetchWorldContext(): Promise<WorldContext> {
 function buildRequestBody(): Record<string, unknown> {
   const today = DATE_FMT.format(Date.now());
   return {
+    // Light topics only: the persona chats with strangers, so no politics or heavy news (first real run returned midterms and tariffs).
     input:
-      `It is ${today}. A college student at HackTX at UT Austin this weekend. Find: 6 things people their age ` +
-      "are talking about this week (trending topics, games, music, sports, memes), 4 current headlines, " +
-      "5 Austin/UT-specific current details (events, sports, campus news), today's Austin weather. Short phrases.",
+      `It is ${today}. A college student at HackTX at UT Austin this weekend. Find: 7 things people their age ` +
+      "are talking about this week (trending topics, games, music, sports, memes), 3 light current headlines " +
+      "(sports, entertainment, tech), 6 Austin/UT-specific current details (events, sports, campus life), " +
+      "today's Austin weather. Nothing about politics, elections, crime, disasters or other heavy news. Short phrases.",
     tools: [{ type: "web_search" }],
     reasoning: { effort: "low" },
     text: { format: { type: "json_schema", name: "world_context", strict: true, schema: SCHEMA } },
@@ -174,6 +176,10 @@ function cleanText(v: unknown, max: number): string {
   return typeof v === "string" ? truncateAtWord(oneLine(stripCitations(v)), max) : "";
 }
 
+/** Safety net for the prompt's "no politics or heavy news" (the model doesn't always comply). */
+const HEAVY_TOPIC_RE =
+  /\b(elections?|midterms?|ballots?|voters?|voting|trump|biden|harris|vance|maga|congress|senate|senators?|governor|abbott|democrats?|republicans?|gop|tariffs?|impeach\w*|shutdown|supreme court|immigration|deport\w*|war|shooting|killed|murder\w*|disasters?)\b/i;
+
 function cleanList(v: unknown): string[] {
   if (!Array.isArray(v)) return [];
   const out: string[] = [];
@@ -181,7 +187,7 @@ function cleanList(v: unknown): string[] {
   for (const item of v) {
     const s = cleanText(item, MAX_ITEM_CHARS);
     const key = s.toLowerCase();
-    if (!s || seen.has(key)) continue;
+    if (!s || seen.has(key) || HEAVY_TOPIC_RE.test(s)) continue;
     seen.add(key);
     out.push(s);
     if (out.length >= MAX_ITEMS) break;

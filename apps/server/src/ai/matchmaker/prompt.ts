@@ -139,7 +139,8 @@ export function buildMatchmakerRequest(args: {
       type: "json_schema",
       json_schema: { name: "matchmaker", strict: true, schema: MATCHMAKER_SCHEMA },
     },
-    reasoning_effort: "low",
+    // "low" spent ~1000 tokens reasoning and got cut off before the JSON in the first real run.
+    reasoning_effort: "minimal",
     max_completion_tokens: 1000,
   };
 }

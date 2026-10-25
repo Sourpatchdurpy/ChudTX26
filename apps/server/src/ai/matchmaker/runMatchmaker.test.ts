@@ -308,7 +308,7 @@ describe("runMatchmaker: the request", () => {
     await runMatchmakerWith(makeInput(5), { timeoutMs: 8000 }, deps(call));
     const { req, opts } = calls[0]!;
 
-    assert.equal(req.reasoning_effort, "low");
+    assert.equal(req.reasoning_effort, "minimal");
     assert.equal(req.max_completion_tokens, 1000);
     assert.equal(req.response_format?.type, "json_schema");
     assert.equal(req.response_format?.json_schema.name, "matchmaker");

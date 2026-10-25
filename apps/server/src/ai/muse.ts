@@ -10,6 +10,8 @@ import { AbortedError, TimeoutError, oneLine, truncateAtWord } from "./util.js";
 const BASE_URL = "https://api.meta.ai/v1";
 const DEFAULT_MODEL = "muse-spark-1.3";
 const MAX_COMPLETION_TOKENS = 1000;
+/** Persona generation (label "persona") runs once per game in the lobby and needs room for reasoning plus a big JSON. */
+const PERSONA_MAX_COMPLETION_TOKENS = 2000;
 const RATE_WINDOW_MS = 60_000;
 
 export class BudgetExceededError extends Error { override name = "BudgetExceededError"; }
@@ -186,11 +188,12 @@ export function logRoomMuseStats(roomCode: string): void {
 }
 
 // ── guardrails ──
-function clampRequest(req: MuseChatRequest): MuseChatRequest {
+function clampRequest(req: MuseChatRequest, label: string | undefined): MuseChatRequest {
   let out = req;
-  if (typeof req.max_completion_tokens === "number" && req.max_completion_tokens > MAX_COMPLETION_TOKENS) {
-    warnOnce("clamp:tokens", `[muse] max_completion_tokens=${req.max_completion_tokens} clamped to ${MAX_COMPLETION_TOKENS} (budget guardrail)`);
-    out = { ...out, max_completion_tokens: MAX_COMPLETION_TOKENS };
+  const maxTokens = label === "persona" ? PERSONA_MAX_COMPLETION_TOKENS : MAX_COMPLETION_TOKENS;
+  if (typeof req.max_completion_tokens === "number" && req.max_completion_tokens > maxTokens) {
+    warnOnce(`clamp:tokens:${maxTokens}`, `[muse] max_completion_tokens=${req.max_completion_tokens} clamped to ${maxTokens} (budget guardrail)`);
+    out = { ...out, max_completion_tokens: maxTokens };
   }
   if (req.reasoning_effort === "high" || req.reasoning_effort === "xhigh") {
     warnOnce("clamp:effort", `[muse] reasoning_effort=${req.reasoning_effort} downgraded to medium (budget guardrail)`);
@@ -379,7 +382,7 @@ interface ChatResponseLike {
 /** chat.completions.create with every guardrail; returns JSON.parse(choices[0].message.content). */
 export const museCall: MuseCallFn = async <T>(req: MuseChatRequest, opts: MuseCallOptions = {}): Promise<T> => {
   if (callOverride) return callOverride<T>(req, opts);
-  const body: Record<string, unknown> = { ...clampRequest(req), model: museModel() };
+  const body: Record<string, unknown> = { ...clampRequest(req, opts.label), model: museModel() };
   const room = opts.roomCode || req.prompt_cache_key || "-";
   return runGuarded<T>(
     {
