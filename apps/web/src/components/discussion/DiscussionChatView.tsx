@@ -55,7 +55,9 @@ export default function DiscussionChatView({
   const deadlineRef = useRef<number | null>(null);
   const endedRef = useRef(false);
   const callbacksRef = useRef({ onSendMessage, onDiscussionEnd });
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const logRef = useRef<HTMLDivElement>(null);
+  /** True while the reader is at (or near) the newest message. */
+  const stickToBottomRef = useRef(true);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const reduceMotion = !!useReducedMotion();
   const viewportHeight = useVisualViewportHeight();
@@ -109,9 +111,12 @@ export default function DiscussionChatView({
     return () => clearInterval(timer);
   }, [startSeconds]);
 
+  // Follow new messages only when one arrives (the parent re-renders several times a second)
+  // and only if the reader is already at the bottom; scroll the log itself, never the page.
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'nearest' });
-  }, [messages, reduceMotion]);
+    const log = logRef.current;
+    if (log && stickToBottomRef.current) log.scrollTop = log.scrollHeight;
+  }, [messages.length]);
 
   useEffect(() => {
     if (!inputRef.current) return;
@@ -123,6 +128,7 @@ export default function DiscussionChatView({
     if (!callbacksRef.current.onSendMessage || pendingRef.current || endedRef.current || deadlineRef.current === null || Date.now() >= deadlineRef.current || !inputText.trim() || charCount > CHARACTER_LIMIT) return;
     pendingRef.current = { text: inputText.trim(), releaseAt: Date.now() + HOLD_SECONDS * 1000 };
     callbacksRef.current.onSendMessage(inputText.trim());
+    stickToBottomRef.current = true;
     setHolding(true);
     setHoldSeconds(HOLD_SECONDS);
     setInputText('');
@@ -156,10 +162,9 @@ export default function DiscussionChatView({
       <div className={`relative flex min-h-0 min-w-0 flex-1 flex-col gap-3 rounded-2xl border-2 p-3 backdrop-blur-xs lg:p-4 ${glass}`}>
         <PixelCorners />
         <div className={`hidden items-center justify-between gap-3 border-b pb-4 lg:flex ${isDarkMode ? 'border-[#00E5FF]/25' : 'border-[#16223B]/25'}`}><h2 className={`font-pixel text-xs ${accent}`}>CHAT</h2><span className={`max-w-[65%] truncate font-pixel text-[8px] ${muted}`}>{currentUserNickname}</span></div>
-        <div role="log" aria-label="Discussion messages" aria-live="polite" aria-relevant="additions" className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain py-2 pr-1">
+        <div ref={logRef} onScroll={event => { const log = event.currentTarget; stickToBottomRef.current = log.scrollHeight - log.scrollTop - log.clientHeight < 80; }} role="log" aria-label="Discussion messages" aria-live="polite" aria-relevant="additions" className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain py-2 pr-1">
           {messages.length === 0 && <p className={`py-8 text-center text-sm ${muted}`}>No messages yet. Start the discussion.</p>}
           {messages.map(message => <Message key={message.id} message={message} self={message.senderNickname === currentUserNickname} isDarkMode={isDarkMode} reduceMotion={reduceMotion} />)}
-          <div ref={messagesEndRef} />
         </div>
 
         <form onSubmit={event => { event.preventDefault(); send(); }} className={`shrink-0 rounded-2xl border-2 p-2 backdrop-blur-xs sm:p-3 ${glass}`}>
