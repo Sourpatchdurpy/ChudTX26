@@ -21,9 +21,22 @@ import type {
 // The AI is a "virtual client": the server gives it exactly the RoomView a
 // human in its seat would get (me = the AI), and it acts only through
 // AiActions, which run the same validation and the same chat delay as human
-// socket events. The AI therefore can never see anything a human couldn't.
+// socket events. The sole information exception is the private round-one
+// submitted-answer snapshot below; it is never included in a browser view.
+
+export interface FirstQuestionAnswerSnapshot {
+  sessionGeneration: string;
+  round: 1;
+  promptId: string;
+  question: string;
+  revision: number;
+  humanPlayerIds: PlayerId[];
+  submittedCount: number;
+  answers: { playerId: PlayerId; nickname: string; text: string }[];
+}
 
 export type GameEvent =
+  | { type: "firstQuestionAnswersUpdated"; snapshot: FirstQuestionAnswerSnapshot }
   | { type: "gameStarted" }
   | { type: "phaseChanged"; phase: Phase; round: RoundNumber | null }
   /** A message just became visible to the AI (after the send delay). Includes the AI's own messages. */
@@ -49,6 +62,7 @@ export interface AiPlayer {
 }
 
 export interface AiPlayerInit {
+  sessionGeneration: string;
   roomCode: RoomCode;
   aiPlayerId: PlayerId;
   persona: Persona;
@@ -80,11 +94,10 @@ export interface WorldContext {
 export interface Persona {
   name: string;
   age: number;
-  school: string;
-  year: string; // "sophomore"
-  major: string;
+  school?: string;
+  year?: string;
+  major?: string;
   hometown: string;
-  hackathonStory: string; // who they came with, what their team is building, how tired they are
   interests: string[];
   opinions: string[]; // a few strong, specific takes
   facts: string[]; // concrete biographical details to stay consistent with
@@ -143,7 +156,12 @@ export interface MuseChatRequest {
  * choices[0].message.content and returns it. Throws on final failure.
  * Callers must still sanity-check fields (it's a cast, not a validation).
  */
-export type MuseCall = <T>(req: MuseChatRequest, opts?: { timeoutMs?: number; label?: string }) => Promise<T>;
+export type MuseCall = <T>(req: MuseChatRequest, opts?: {
+  timeoutMs?: number;
+  label?: string;
+  signal?: AbortSignal;
+  deadlineAtMs?: number;
+}) => Promise<T>;
 
 /** How the humans in this room are texting. Computed by Part 2's computeStyleProfile. */
 export interface StyleProfile {
