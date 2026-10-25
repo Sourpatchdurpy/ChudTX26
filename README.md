@@ -1,4 +1,4 @@
-# ChudTX26
+# aMuse-Us
 HackTX26 repository for Nathan Tan, Gengwen Li, Sanjey Manian, and Bradley Ngyuen
 
 Run `npm install` and `npm run dev` to start the root Vite frontend at
