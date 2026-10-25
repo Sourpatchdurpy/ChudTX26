@@ -82,7 +82,7 @@ export interface RevealPayload {
   aiPlayerId: PlayerId;
   humansWon: boolean;
   finalVoteCounts: Record<PlayerId, number>;
-  /** Humans only. The AI's "name" comes from aiPersona. */
+  /** Humans only. aiPersona.name holds the AI's game-assigned nickname. */
   realNames: Record<PlayerId, string>;
   aiPersona: { name: string; blurb: string };
   aiNotes: AiNoteView[]; // at most ~6, already curated

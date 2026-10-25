@@ -17,9 +17,16 @@ const NAMES = ["Xanthippe", "Quillon", "Brontae", "Zephyrine"];
 const failures: string[] = [];
 const phasesSeen = new Set<Phase>();
 let viewsChecked = 0;
+let personaBlurb = "";
 
 const room = new Room("TEST", {
-  ai: stub,
+  ai: {
+    ...stub,
+    createAiPlayer(init) {
+      personaBlurb = init.persona.blurb;
+      return stub.createAiPlayer(init);
+    },
+  },
   content: loadContent(),
   log: () => {},
   transport: { state: (sid, view) => onView(sid, view), closed: () => {} },
@@ -92,7 +99,8 @@ function checkView(label: string, view: RoomView, viewerId: string | null) {
   // Real names: only your own, plus the lobby list while in the lobby.
   if (view.phase !== "lobby") {
     for (const h of humans) if (h.id !== viewerId && json.includes(h.name)) fail(`${label}: leaks real name ${h.name}`);
-    if (aiId && viewerId !== aiId && json.includes(stub.STUB_PERSONA.name)) fail(`${label}: leaks AI persona name`);
+    // Personas have no name; the blurb is the identifying detail that must stay hidden until reveal.
+    if (aiId && viewerId !== aiId && personaBlurb && json.includes(personaBlurb)) fail(`${label}: leaks AI persona blurb`);
   }
 
   // The AI's id may appear only where any player's id can appear.

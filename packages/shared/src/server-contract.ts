@@ -21,9 +21,22 @@ import type {
 // The AI is a "virtual client": the server gives it exactly the RoomView a
 // human in its seat would get (me = the AI), and it acts only through
 // AiActions, which run the same validation and the same chat delay as human
-// socket events. The AI therefore can never see anything a human couldn't.
+// socket events. The sole information exception is the private round-one
+// submitted-answer snapshot below; it is never included in a browser view.
+
+export interface FirstQuestionAnswerSnapshot {
+  sessionGeneration: string;
+  round: 1;
+  promptId: string;
+  question: string;
+  revision: number;
+  humanPlayerIds: PlayerId[];
+  submittedCount: number;
+  answers: { playerId: PlayerId; nickname: string; text: string }[];
+}
 
 export type GameEvent =
+  | { type: "firstQuestionAnswersUpdated"; snapshot: FirstQuestionAnswerSnapshot }
   | { type: "gameStarted" }
   | { type: "phaseChanged"; phase: Phase; round: RoundNumber | null }
   /** A message just became visible to the AI (after the send delay). Includes the AI's own messages. */
@@ -43,12 +56,14 @@ export interface AiPlayer {
   /** Called on every change. Must return fast and never throw: do async work in the background. */
   onEvent(event: GameEvent, view: RoomView): void;
   /** Called once when the game reaches "reveal". */
+  // persona.name is the assigned game nickname, not a generated persona field.
   getRevealInfo(): { persona: { name: string; blurb: string }; notes: AiNoteView[] };
   /** Stop timers and pending Muse calls (room ended or deleted). */
   dispose(): void;
 }
 
 export interface AiPlayerInit {
+  sessionGeneration: string;
   roomCode: RoomCode;
   aiPlayerId: PlayerId;
   persona: Persona;
@@ -78,24 +93,16 @@ export interface WorldContext {
 }
 
 export interface Persona {
-  name: string;
   age: number;
-  school: string;
-  year: string; // "sophomore"
-  major: string;
+  school?: string;
+  year?: string;
+  major?: string;
   hometown: string;
-  hackathonStory: string; // who they came with, what their team is building, how tired they are
   interests: string[];
   opinions: string[]; // a few strong, specific takes
   facts: string[]; // concrete biographical details to stay consistent with
   thisWeek: string[]; // things they did/saw this week, grounded in WorldContext
-  style: {
-    casing: "lowercase" | "mixed";
-    emojiRate: number; // average emojis per message, e.g. 0.2
-    slang: string[]; // a few words they actually use
-    punctuation: "minimal" | "normal";
-  };
-  blurb: string; // one line for the reveal screen: "Jordan, sophomore CS from Houston"
+  blurb: string; // name-free reveal description, e.g. "geography student from San Marcos"
   /** Part 2 may add fields here without a contract change. */
   extra?: Record<string, unknown>;
 }
@@ -143,7 +150,12 @@ export interface MuseChatRequest {
  * choices[0].message.content and returns it. Throws on final failure.
  * Callers must still sanity-check fields (it's a cast, not a validation).
  */
-export type MuseCall = <T>(req: MuseChatRequest, opts?: { timeoutMs?: number; label?: string }) => Promise<T>;
+export type MuseCall = <T>(req: MuseChatRequest, opts?: {
+  timeoutMs?: number;
+  label?: string;
+  signal?: AbortSignal;
+  deadlineAtMs?: number;
+}) => Promise<T>;
 
 /** How the humans in this room are texting. Computed by Part 2's computeStyleProfile. */
 export interface StyleProfile {

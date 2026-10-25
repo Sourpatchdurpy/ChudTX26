@@ -39,7 +39,7 @@ export function chatDelayMs(): number {
 export const ALL_ANSWERED_GRACE_MS = 2_000;
 /** When everyone has voted, the vote phase ends this long after. */
 export const ALL_VOTED_GRACE_MS = 1_500;
-/** Max wait for the AI persona at game start before falling back to STUB_PERSONA. */
+/** Max wait for the AI persona at game start before freezing a complete fallback persona. */
 export const PERSONA_WAIT_MS = 10_000;
 /** Timeout passed to runMatchmaker; we also race it ourselves slightly longer. */
 export const MATCHMAKER_TIMEOUT_MS = 8_000;
