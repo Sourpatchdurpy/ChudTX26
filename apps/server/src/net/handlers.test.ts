@@ -129,3 +129,37 @@ describe("socket handlers", () => {
     assert.equal(late.ok, false);
   });
 });
+
+describe("host-picked room codes and leaving", () => {
+  test("a host can pick the code; taken and invalid codes are refused", async () => {
+    const a = await client();
+    const created = await emit<any>(a, "room:create", { realName: "A", code: "z9q1" });
+    assert.ok(created.ok);
+    assert.equal(created.code, "Z9Q1");
+    const b = await client();
+    assert.deepEqual(await emit<any>(b, "room:create", { realName: "B", code: "Z9Q1" }), {
+      ok: false,
+      error: "That room code is already in use. Reroll the code and try again.",
+    });
+    assert.equal((await emit<any>(b, "room:create", { realName: "B", code: "TOOLONG" })).ok, false);
+    const joined = await emit<any>(b, "room:join", { code: "z9q1", realName: "B" });
+    assert.ok(joined.ok, "joining by a code with digits works");
+  });
+
+  test("room:leave: a player leaves the lobby list; the host leaving closes the room for everyone", async () => {
+    const host = await client();
+    const created = await emit<any>(host, "room:create", { realName: "Hana" });
+    const p = await client();
+    await emit<any>(p, "room:join", { code: created.code, realName: "Pat" });
+    const q = await client();
+    await emit<any>(q, "room:join", { code: created.code, realName: "Quinn" });
+    // Wait for the first lobby update without Pat (earlier join broadcasts may still be in flight).
+    const afterLeave = new Promise<RoomView>((r) => { const on = (v: RoomView) => { if (!v.lobby?.realNames.includes("Pat")) { host.off("room:state", on); r(v); } }; host.on("room:state", on); });
+    assert.ok((await emit<any>(p, "room:leave")).ok);
+    assert.deepEqual((await afterLeave).lobby?.realNames, ["Hana", "Quinn"]);
+    const closed = new Promise<{ reason: string }>((r) => q.once("room:closed", r));
+    assert.ok((await emit<any>(host, "room:leave")).ok);
+    assert.equal((await closed).reason, "The host closed the room.");
+    assert.equal(registry.get(created.code), undefined);
+  });
+});

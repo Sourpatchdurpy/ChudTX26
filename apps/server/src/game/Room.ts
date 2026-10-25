@@ -45,6 +45,8 @@ export interface Seat {
   emoji?: string;
   /** Codename picked on the entry screen (a NICKNAMES entry). Honored at start; cleared on play again. */
   requestedCodename?: string;
+  /** Left mid-game: the seat stays for this game (others still see it) and is dropped on play again. */
+  left?: boolean;
   socketIds: Set<string>;
   connected: boolean;
 }
@@ -326,7 +328,7 @@ export class Room {
     if (text.length > LIMITS.chatMaxChars) return fail(`Message must be at most ${LIMITS.chatMaxChars} characters.`);
 
     const visibleAt = Date.now() + chatDelayMs();
-    const message: ChatMessage = { id: nanoid(12), channel, pairId, from: id, text, at: visibleAt };
+    const message: ChatMessage = { id: nanoid(12), channel, pairId, from: id, text, at: visibleAt, round: this.roundNumber };
     const timer = setTimeout(() => this.releaseMessage(message.id), visibleAt - Date.now());
     this.pending.set(message.id, { message, timer });
     this.touch();
@@ -389,6 +391,23 @@ export class Room {
     return { ok: true };
   }
 
+  /**
+   * Leaving for good. Lobby: the seat is removed; if it's the host, the caller closes the room
+   * (`closeRoom`). Mid-game: the seat stays for this game and is dropped on play again.
+   */
+  leave(id: PlayerId): Ok<{ closeRoom: boolean }> {
+    const seat = this.seat(id);
+    if (!seat || seat.isAi) return fail("You are not in this room.");
+    this.touch();
+    if (this.phase === "lobby" && !this.busy) {
+      if (seat.isHost) return { ok: true, closeRoom: true };
+      this.seats = this.seats.filter((s) => s.id !== id);
+      return { ok: true, closeRoom: false };
+    }
+    seat.left = true;
+    return { ok: true, closeRoom: false };
+  }
+
   // ── host controls ──────────────────────────────────────────────────────────
 
   hostAdvance(id: PlayerId): Ok {
@@ -401,11 +420,12 @@ export class Room {
     return { ok: true };
   }
 
+  /** Allowed from the reveal too, so one "back to lobby" press works (partner cards are shown at the reveal). */
   playAgain(id: PlayerId): Ok {
     if (!this.seat(id)?.isHost) return fail("Only the host can do that.");
-    if (this.phase !== "partners") return fail("You can play again once the game is over.");
+    if (this.phase !== "partners" && this.phase !== "reveal") return fail("You can play again once the game is over.");
     this.endGame();
-    this.seats = this.seats.filter((s) => !s.isAi);
+    this.seats = this.seats.filter((s) => !s.isAi && !s.left);
     for (const s of this.seats) {
       delete s.nickname;
       delete s.emoji;

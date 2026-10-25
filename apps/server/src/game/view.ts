@@ -80,6 +80,7 @@ function buildMe(room: Room, seat: Seat, pairMembers: PlayerId[]): MeView {
     myPairId: room.pairOf(seat.id)?.id ?? null,
     myCollabResult: room.collabDraft.get(seat.id) ?? null,
     myVouches: Object.fromEntries(partners.map((id) => [id, mine?.get(id) ?? false])),
-    partnerCard: room.phase === "partners" ? structuredClone(room.partnerCards.get(seat.id) ?? null) : null,
+    // Your own card only, from the reveal on (the reveal screen shows it in its last step).
+    partnerCard: room.phase === "reveal" || room.phase === "partners" ? structuredClone(room.partnerCards.get(seat.id) ?? null) : null,
   };
 }

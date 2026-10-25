@@ -45,6 +45,8 @@ export interface ChatMessage {
   text: string;
   /** Server time (ms) when the message became visible, i.e. after the send delay. */
   at: number;
+  /** Round the message was sent in (lets the UI show each round's chat separately). */
+  round?: RoundNumber | null;
 }
 
 export interface RoundAnswer {
@@ -120,7 +122,7 @@ export interface MeView {
   myPairId: PairId | null;
   myCollabResult: string | null;
   myVouches: Record<PlayerId, boolean>;
-  partnerCard: PartnerCard | null; // "partners" phase only
+  partnerCard: PartnerCard | null; // "reveal" and "partners" only (your own card)
 }
 
 export interface CurrentRound {

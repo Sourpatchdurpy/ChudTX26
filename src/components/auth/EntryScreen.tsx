@@ -4,7 +4,7 @@ import { Moon, RotateCw, Sun } from 'lucide-react';
 import PixelSky from '../shared/PixelSky';
 import ArcadeTitle from '../shared/ArcadeTitle';
 import type { EntryScreenProps } from '@/types/game';
-import { generateCodename } from '../../lib/entryIdentity';
+import { generateCodename, generateRoomCode } from '../../lib/entryIdentity';
 
 export type { EntryScreenProps } from '@/types/game';
 
@@ -23,18 +23,18 @@ function PixelFrame({ isDarkMode }: { isDarkMode: boolean }) {
   </div>;
 }
 
-export default function EntryScreen({ onEnter, isDarkMode, onToggleTheme, initialError }: EntryScreenProps) {
+export default function EntryScreen({ onEnter, isDarkMode, onToggleTheme }: EntryScreenProps) {
   const [nickname, setNickname] = useState(() => generateCodename());
-  const [rerolls, setRerolls] = useState(0);
-  const [realName, setRealName] = useState('');
   const [roomCode, setRoomCode] = useState('');
   const [isHost, setIsHost] = useState(false);
-  const [entryError, setEntryError] = useState(initialError ?? '');
+  const [hostCode, setHostCode] = useState(() => generateRoomCode());
+  const [rerolls, setRerolls] = useState(0);
+  const [entryError, setEntryError] = useState('');
   const [isEntering, setIsEntering] = useState(false);
   const submittingRef = useRef(false);
   const reduceMotion = useReducedMotion();
-  // Hosts get a code from the server; joiners type the one on the host's screen.
-  const canSubmit = realName.trim().length > 0 && (isHost || /^[A-Z]{4}$/.test(roomCode));
+  const activeCode = isHost ? hostCode : roomCode;
+  const validCode = /^[A-Z0-9]{4}$/.test(activeCode);
   const focusClass = `focus-visible:outline-2 focus-visible:outline-offset-4 ${isDarkMode ? 'focus-visible:outline-white' : 'focus-visible:outline-[#0064E0]'}`;
   const muted = isDarkMode ? 'text-[#B5DFFF]' : 'text-[#26374F]';
   const accent = isDarkMode ? 'text-[#00E5FF]' : 'text-[#0E1726]';
@@ -57,11 +57,11 @@ export default function EntryScreen({ onEnter, isDarkMode, onToggleTheme, initia
           <PixelFrame isDarkMode={isDarkMode} />
           <form aria-label={isHost ? 'Host room' : 'Join room'} aria-busy={isEntering} onSubmit={async event => {
             event.preventDefault();
-            if (!canSubmit || submittingRef.current) return;
+            if (!validCode || submittingRef.current) return;
             submittingRef.current = true;
             setIsEntering(true);
             setEntryError('');
-            try { await onEnter({ codename: nickname, realName: realName.trim(), roomCode, isHost }); }
+            try { await onEnter({ nickname, roomCode: activeCode, isHost }); }
             catch (error) { setEntryError(error instanceof Error ? error.message : 'Unable to enter this room. Please try again.'); }
             finally { submittingRef.current = false; setIsEntering(false); }
           }} className="flex min-w-0 w-full flex-col gap-4 sm:gap-5">
@@ -75,25 +75,21 @@ export default function EntryScreen({ onEnter, isDarkMode, onToggleTheme, initia
                 <motion.button type="button" aria-label="Reroll codename" title="Reroll codename" disabled={isEntering} onClick={() => { setEntryError(''); setNickname(previous => generateCodename(previous)); setRerolls(value => value + 1); }} animate={{ rotate: reduceMotion ? 0 : rerolls * 180 }} transition={{ type: 'spring', stiffness: 260, damping: 22 }} className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-lg hover:bg-white/15 ${accent} ${focusClass}`}><RotateCw size={18} aria-hidden="true" /></motion.button>
               </div>
             </div>
-            <div>
-              <label htmlFor="entry-real-name" className={`mb-2 block text-[8px] leading-relaxed tracking-wider sm:text-[10px] ${muted}`}>YOUR FIRST NAME</label>
-              <input id="entry-real-name" type="text" required autoComplete="given-name" maxLength={20} disabled={isEntering} value={realName} onChange={event => { setEntryError(''); setRealName(event.target.value.slice(0, 20)); }} placeholder="Maya" className={`w-full rounded-xl border px-3 py-3 font-sans text-base focus:outline-2 focus:outline-offset-4 ${capsule} ${isDarkMode ? 'text-white placeholder:text-[#7D9CBD] focus:outline-white' : 'text-[#0E1726] placeholder:text-[#526078] focus:outline-[#0E1726]'}`} />
-              <p className={`mt-2 font-sans text-xs ${muted}`}>Stays secret until the reveal. Everyone plays under their codename.</p>
-            </div>
             <motion.div key={isHost ? 'host' : 'join'} initial={{ opacity: reduceMotion ? 1 : 0 }} animate={{ opacity: 1 }} transition={{ duration: reduceMotion ? 0 : 0.15 }}>
               {isHost ? <>
-                <div className={`rounded-xl border p-3 text-center ${capsule}`}>
-                  <p className={`text-[8px] leading-loose sm:text-[10px] ${accent}`}>[ ROOM CODE ASSIGNED ON CREATE ]</p>
-                  <p className={`mt-1 font-sans text-xs ${muted}`}>Share it with 2–5 friends once the lobby opens.</p>
+                <p id="host-code-label" className={`mb-2 text-[8px] tracking-wider sm:text-[10px] ${muted}`}>YOUR ROOM CODE</p>
+                <div className={`flex flex-col items-center gap-3 rounded-xl border p-3 ${capsule}`}>
+                  <p aria-labelledby="host-code-label" aria-live="polite" aria-atomic="true" className={`text-[10px] leading-loose sm:text-sm ${accent}`}>[ ROOM: {hostCode} ]</p>
+                  <button type="button" disabled={isEntering} onClick={() => { setEntryError(''); setHostCode(previous => generateRoomCode(previous)); }} className={`flex items-center min-h-11 gap-2 rounded-lg border px-3 py-2 text-[8px] hover:bg-white/15 ${capsule} ${accent} ${focusClass}`}><RotateCw size={12} aria-hidden="true" />REROLL CODE</button>
                 </div>
               </> : <>
                 <label htmlFor="entry-room-code" className={`mb-2 block text-[8px] tracking-wider sm:text-[10px] ${muted}`}>ROOM CODE</label>
-                <input id="entry-room-code" type="text" required autoComplete="off" autoCapitalize="characters" spellCheck={false} minLength={4} maxLength={4} pattern="[A-Z]{4}" disabled={isEntering} aria-invalid={!!entryError} aria-describedby={entryError ? 'room-code-help entry-error' : 'room-code-help'} value={roomCode} onChange={event => { setEntryError(''); setRoomCode(event.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4)); }} placeholder="CODE" className={`w-full rounded-xl border py-3 text-center text-xl leading-relaxed tracking-widest uppercase focus:outline-2 focus:outline-offset-4 ${capsule} ${isDarkMode ? 'text-[#00E5FF] placeholder:text-[#7D9CBD] focus:outline-white' : 'text-[#0E1726] placeholder:text-[#526078] focus:outline-[#0E1726]'}`} />
-                <p id="room-code-help" className={`mt-2 text-center font-sans text-xs ${muted}`}>Enter the 4-letter code from the host's screen.</p>
+                <input id="entry-room-code" type="text" required autoComplete="off" autoCapitalize="characters" spellCheck={false} minLength={4} maxLength={4} pattern="[A-Z0-9]{4}" disabled={isEntering} aria-invalid={!!entryError} aria-describedby={entryError ? 'room-code-help entry-error' : 'room-code-help'} value={roomCode} onChange={event => { setEntryError(''); setRoomCode(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4)); }} placeholder="CODE" className={`w-full rounded-xl border py-3 text-center text-xl leading-relaxed tracking-widest uppercase focus:outline-2 focus:outline-offset-4 ${capsule} ${isDarkMode ? 'text-[#00E5FF] placeholder:text-[#7D9CBD] focus:outline-white' : 'text-[#0E1726] placeholder:text-[#526078] focus:outline-[#0E1726]'}`} />
+                <p id="room-code-help" className={`mt-2 text-center font-sans text-xs ${muted}`}>Enter your 4-character room code.</p>
               </>}
             </motion.div>
             {entryError && <p id="entry-error" role="alert" className={`rounded-xl border px-3 py-2 font-sans text-sm leading-relaxed ${isDarkMode ? 'border-[#FF5376]/50 bg-black/25 text-[#FFADBF]' : 'border-[#9E173B]/40 bg-white/30 text-[#8B1634]'}`}>{entryError}</p>}
-            <button type="submit" disabled={!canSubmit || isEntering} className={`flex w-full cursor-pointer items-center justify-center rounded-xl border-b-4 border-[#B31D3F] bg-[#FF5376] py-4 text-[10px] leading-relaxed tracking-wider text-white uppercase shadow-[0_0_15px_#FF5376] transition-all hover:bg-[#FF3360] active:translate-y-1 disabled:cursor-not-allowed disabled:opacity-50 disabled:active:translate-y-0 sm:text-sm ${focusClass}`}>{isEntering ? 'CHECKING ROOM...' : isHost ? 'CREATE LOBBY' : 'START MISSION'}</button>
+            <button type="submit" disabled={!validCode || isEntering} className={`flex w-full cursor-pointer items-center justify-center rounded-xl border-b-4 border-[#B31D3F] bg-[#FF5376] py-4 text-[10px] leading-relaxed tracking-wider text-white uppercase shadow-[0_0_15px_#FF5376] transition-all hover:bg-[#FF3360] active:translate-y-1 disabled:cursor-not-allowed disabled:opacity-50 disabled:active:translate-y-0 sm:text-sm ${focusClass}`}>{isEntering ? 'CHECKING ROOM...' : isHost ? 'CREATE LOBBY' : 'START MISSION'}</button>
           </form>
         </section>
       </motion.div>

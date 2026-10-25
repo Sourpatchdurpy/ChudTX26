@@ -8,13 +8,14 @@ import type { Phase } from "./types";
 /** Phase lengths in ms. null = no timer (host advances). Tune these at playtests. */
 export const DEFAULT_TIMERS: Record<Phase, number | null> = {
   lobby: null,
-  answer: 30_000,
-  discuss: 45_000,
-  vote: 12_000,
+  // answer/discuss/vote/finalVote match the arcade UI's built-in countdowns (35s / 50s / 20s).
+  answer: 35_000,
+  discuss: 50_000,
+  vote: 20_000,
   voteResult: 6_000,
   pairChat: 90_000,
   pairResults: 20_000,
-  finalVote: 15_000,
+  finalVote: 20_000,
   reveal: null,
   partners: null,
 };

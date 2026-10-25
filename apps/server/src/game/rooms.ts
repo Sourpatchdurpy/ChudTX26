@@ -3,6 +3,15 @@
 import { ROOM_CODE_ALPHABET, ROOM_CODE_LENGTH, ROOM_TTL_MS, type PlayerId, type RoomCode } from "@game/shared";
 import { Room, type RoomDeps } from "./Room.js";
 
+/** Host-picked room codes: 4 letters or digits (the entry screen's generator). */
+export const REQUESTED_CODE_PATTERN = /^[A-Z0-9]{4}$/;
+
+export class RoomCodeTakenError extends Error {
+  constructor() {
+    super("That room code is already in use. Reroll the code and try again.");
+  }
+}
+
 export interface SocketBinding {
   code: RoomCode;
   /** null = spectator. */
@@ -15,14 +24,20 @@ export class RoomRegistry {
 
   constructor(private readonly deps: RoomDeps) {}
 
-  create(): Room {
+  /** `requested` = a host-picked code (already validated, upper case); throws if taken. */
+  create(requested?: RoomCode): Room {
     let code: RoomCode;
-    do {
-      code = Array.from(
-        { length: ROOM_CODE_LENGTH },
-        () => ROOM_CODE_ALPHABET[Math.floor(Math.random() * ROOM_CODE_ALPHABET.length)],
-      ).join("");
-    } while (this.rooms.has(code));
+    if (requested) {
+      if (this.rooms.has(requested)) throw new RoomCodeTakenError();
+      code = requested;
+    } else {
+      do {
+        code = Array.from(
+          { length: ROOM_CODE_LENGTH },
+          () => ROOM_CODE_ALPHABET[Math.floor(Math.random() * ROOM_CODE_ALPHABET.length)],
+        ).join("");
+      } while (this.rooms.has(code));
+    }
     const room = new Room(code, this.deps);
     this.rooms.set(code, room);
     this.deps.log(`[${code}] created (${this.rooms.size} rooms)`);

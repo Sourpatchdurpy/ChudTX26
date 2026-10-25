@@ -580,3 +580,45 @@ describe("codenames", () => {
     assert.ok(t.room.seats.every((s) => s.requestedCodename === undefined));
   });
 });
+
+describe("leaving, chat rounds, partner cards at the reveal", () => {
+  test("leaving the lobby removes the seat; the host leaving asks to close the room", () => {
+    const { room, humans, host } = setup({ humans: 3 });
+    assert.deepEqual(room.leave(humans[1]!.id), { ok: true, closeRoom: false });
+    assert.equal(room.seat(humans[1]!.id), undefined);
+    assert.deepEqual(room.leave(host.id), { ok: true, closeRoom: true });
+  });
+
+  test("leaving mid-game keeps the seat for this game; play again drops it", async () => {
+    const t = setup({ humans: 4 });
+    await t.start();
+    const leaver = t.humans[2]!.id;
+    assert.ok(t.room.leave(leaver).ok);
+    assert.ok(t.room.seat(leaver), "still seated for this game");
+    await t.advanceTo("reveal");
+    assert.ok(t.room.reveal!.realNames[leaver], "still in the reveal");
+    assert.ok(t.room.playAgain(t.host.id).ok, "play again works straight from the reveal");
+    assert.equal(t.room.seat(leaver), undefined);
+    assert.equal(t.room.seats.length, 3);
+  });
+
+  test("chat messages carry their round", async () => {
+    const t = setup({ humans: 3 });
+    await t.start();
+    await t.advanceTo("discuss");
+    const r = t.room.sendChat(t.humans[0]!.id, "round one msg", "group");
+    assert.ok(r.ok);
+    await sleep(70);
+    assert.equal(t.room.messages.find((m) => m.text === "round one msg")?.round, 1);
+  });
+
+  test("each player's own partner card is visible from the reveal on", async () => {
+    const t = setup({ humans: 4 });
+    await t.start();
+    await t.advanceTo("reveal");
+    for (const h of t.humans) {
+      const v = buildView(t.room, h.id);
+      assert.ok(v.me?.partnerCard, `${h.name} has a card at the reveal`);
+    }
+  });
+});

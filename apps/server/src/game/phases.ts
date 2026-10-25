@@ -185,4 +185,6 @@ function finishGame(room: Room): void {
   // Humans win only if the AI has strictly the most votes; ties go to the AI.
   room.reveal = buildReveal(room, counts, aiVotes > maxHumanVotes);
   room.log(`final vote: ${room.reveal.humansWon ? "humans" : "AI"} win (AI ${aiVotes}, top human ${maxHumanVotes})`);
+  // Each player's own card is already visible at the reveal (its "talk-to" step).
+  room.partnerCards = buildPartnerCards(room);
 }

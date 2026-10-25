@@ -4,7 +4,7 @@ import type { Server, Socket } from "socket.io";
 import { z } from "zod";
 import type { AckResult, ClientToServerEvents, PlayerId, ServerToClientEvents } from "@game/shared";
 import { errMsg, type Room } from "../game/Room.js";
-import type { RoomRegistry } from "../game/rooms.js";
+import { REQUESTED_CODE_PATTERN, RoomCodeTakenError, type RoomRegistry } from "../game/rooms.js";
 
 type GameServer = Server<ClientToServerEvents, ServerToClientEvents>;
 type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
@@ -14,7 +14,7 @@ const code = z.string().max(16);
 const text = z.string().max(2_000);
 const id = z.string().max(64);
 const S = {
-  create: z.object({ realName: text, codename: z.string().max(32).optional() }),
+  create: z.object({ realName: text, codename: z.string().max(32).optional(), code: code.optional() }),
   join: z.object({ code, realName: text, codename: z.string().max(32).optional() }),
   rejoin: z.object({ code, token: z.string().max(64) }),
   watch: z.object({ code }),
@@ -66,7 +66,15 @@ export function registerHandlers(io: GameServer, registry: RoomRegistry, log: (l
       handle<{ code: string; playerId: PlayerId; token: string }>("room:create", ack, (reply) => {
         const parsed = S.create.safeParse(p);
         if (!parsed.success) return reply(BAD_REQUEST);
-        const room = registry.create();
+        const requested = parsed.data.code?.trim().toUpperCase();
+        if (requested !== undefined && !REQUESTED_CODE_PATTERN.test(requested)) return reply({ ok: false, error: "Enter a valid 4-character room code." });
+        let room: Room;
+        try {
+          room = registry.create(requested);
+        } catch (e) {
+          if (e instanceof RoomCodeTakenError) return reply({ ok: false, error: e.message });
+          throw e;
+        }
         const res = room.addHuman(parsed.data.realName, true, parsed.data.codename);
         if (!res.ok) {
           registry.delete(room, "creation failed");
@@ -116,6 +124,19 @@ export function registerHandlers(io: GameServer, registry: RoomRegistry, log: (l
         registry.bind(socket.id, room, null);
         reply({ ok: true });
         room.sendStateTo(socket.id, null);
+      }),
+    );
+
+    socket.on("room:leave", (ack) =>
+      handle("room:leave", ack, (reply) => {
+        const ctx = registry.lookup(socket.id);
+        if (!ctx?.playerId) return reply(NOT_SEATED);
+        const res = ctx.room.leave(ctx.playerId);
+        if (!res.ok) return reply(res);
+        registry.unbind(socket.id);
+        reply({ ok: true });
+        if (res.closeRoom) registry.delete(ctx.room, "The host closed the room.");
+        else ctx.room.broadcast();
       }),
     );
 

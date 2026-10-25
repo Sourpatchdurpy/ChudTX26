@@ -18,14 +18,20 @@ export interface ClientToServerEvents {
   /**
    * Creates a room; the creator becomes host and joins as a player.
    * `codename` (optional): a NICKNAMES entry the player picked; unused or omitted = random at start.
+   * `code` (optional): a room code the host picked (4 of A–Z/0–9); rejected if already in use. Omitted = server picks.
    */
-  "room:create": (p: { realName: string; codename?: string }, ack: Ack<{ code: RoomCode; playerId: PlayerId; token: string }>) => void;
+  "room:create": (p: { realName: string; codename?: string; code?: RoomCode }, ack: Ack<{ code: RoomCode; playerId: PlayerId; token: string }>) => void;
   /** Join only while phase === "lobby". `codename` as for room:create; must be unique in the room. */
   "room:join": (p: { code: RoomCode; realName: string; codename?: string }, ack: Ack<{ playerId: PlayerId; token: string }>) => void;
   /** Reconnect after refresh/sleep. Client keeps {code, token} in sessionStorage. */
   "room:rejoin": (p: { code: RoomCode; token: string }, ack: Ack<{ playerId: PlayerId }>) => void;
   /** Big-screen spectator. Receives RoomView with me === null and group chat only. */
   "room:watch": (p: { code: RoomCode }, ack: Ack) => void;
+  /**
+   * Leave the room for good. Lobby: your seat is removed (host leaving closes the room).
+   * During a game the seat stays (others still see you); it's dropped on play again.
+   */
+  "room:leave": (ack: Ack) => void;
 
   /** Host only, lobby only, needs >= LIMITS.minHumans humans. */
   "game:start": (ack: Ack) => void;
