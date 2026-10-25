@@ -49,10 +49,13 @@ async function playRoom(tag: string): Promise<string[]> {
     players.push({ s, id: r.playerId, token: r.token, last: null });
   }
   let chatChecked = false;
+  let clockOffset = 0;
   for (const p of players) {
     let lastKey = "";
     p.s.on("room:state", (v) => {
       p.last = v;
+      // Server clock minus ours (the VM's clock can differ from the laptop's).
+      clockOffset = v.serverNow - Date.now();
       const key = `${v.phase}:${v.round?.number}`;
       if (key === lastKey) return;
       lastKey = key;
@@ -60,7 +63,8 @@ async function playRoom(tag: string): Promise<string[]> {
       setTimeout(async () => {
         if (v.phase === "answer") p.s.emit("answer:submit", { text: `answer ${p.id.slice(0, 4)}` }, () => {});
         if (v.phase === "discuss") {
-          const sentAt = Date.now();
+          const serverNow = () => Date.now() + clockOffset;
+          const sentAt = serverNow();
           const r = await call<any>((cb) => p.s.emit("chat:send", { text: `hi from ${p.id.slice(0, 4)}`, channel: "group" }, cb));
           if (!r.ok) problems.push(`chat rejected: ${r.error}`);
           else if (!chatChecked) {
@@ -69,7 +73,7 @@ async function playRoom(tag: string): Promise<string[]> {
             if (Math.abs(delay - CHAT_DELAY_MS) > 300) problems.push(`chat delay ${delay}ms, expected ~${CHAT_DELAY_MS}`);
             // The message must not be in anyone's view before visibleAt.
             const seenEarly = () => players.some((q) => q.last?.messages.some((m) => m.id === r.messageId));
-            await wait(Math.max(0, r.visibleAt - Date.now() - 500));
+            await wait(Math.max(0, r.visibleAt - serverNow() - 500));
             if (seenEarly()) problems.push("chat message visible before visibleAt");
             await wait(1_000);
             if (!seenEarly()) problems.push("chat message not visible after visibleAt");
@@ -111,7 +115,8 @@ async function playRoom(tag: string): Promise<string[]> {
   victim.s = s2;
   s2.on("room:state", (v) => (victim.last = v));
 
-  const deadline = Date.now() + 180_000;
+  // A full game at real speed is ~5 min (TIMER_SCALE=1); allow headroom.
+  const deadline = Date.now() + 10 * 60_000;
   while (host.connected && views[views.length - 1]?.phase !== "reveal") {
     if (Date.now() > deadline) return [...problems, `stuck in ${views[views.length - 1]?.phase}`];
     await wait(200);

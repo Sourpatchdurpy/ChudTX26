@@ -30,7 +30,7 @@ pm2 save
 curl http://VM_IP/health                       # {"ok":true,"aiMode":"stub"}
 ```
 Until Part 1 deploys the web app, `http://VM_IP/` returns 502. That's expected: only `/health` and `/socket.io` are live.
-Full stub-AI game over the internet (about 4 minutes with real timers):
+Full stub-AI game over the internet (about 5 minutes with real timers):
 ```bash
 npm run smoke -w @game/server -- --url http://VM_IP
 ```
