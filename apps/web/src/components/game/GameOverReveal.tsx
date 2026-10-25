@@ -25,8 +25,8 @@ function RevealPlayer({ player, index, isDarkMode }: { player: PlayerSummary; in
   </li>;
 }
 
-export default function GameOverReveal({ isDarkMode, onToggleTheme, didHumansWin, aiNickname, players, mostSusHuman, aiConfessionalNotes, talkToMission, onPlayAgain }: GameOverRevealProps) {
-  const [step, setStep] = useState(0);
+export default function GameOverReveal({ isDarkMode, onToggleTheme, didHumansWin, aiNickname, players, mostSusHuman, aiConfessionalNotes, talkToMission, onPlayAgain, playAgainLabel = 'RETURN TO ARCADE LOBBY', waitingLabel = 'Waiting for the host...', initialStep = 0 }: GameOverRevealProps) {
+  const [step, setStep] = useState(initialStep);
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const copyResetRef = useRef<ReturnType<typeof setTimeout>>();
@@ -149,7 +149,9 @@ export default function GameOverReveal({ isDarkMode, onToggleTheme, didHumansWin
           <span className={`font-pixel text-[9px] ${muted}`}>{step + 1} / 3</span>
           <button type="button" onClick={() => setStep(value => Math.min(2, value + 1))} disabled={step === 2} className={`flex min-h-11 items-center gap-2 rounded-lg px-2 text-sm disabled:opacity-30 ${accent} ${focusClass}`}>Next<ArrowRight size={16} aria-hidden="true" /></button>
         </div>
-        <button type="button" onClick={onPlayAgain} className={`flex min-h-14 w-full items-center justify-center gap-2 rounded-xl border-b-4 border-[#B31D3F] bg-[#FF5376] px-3 py-4 font-pixel text-[9px] leading-loose text-white shadow-[0_0_15px_#FF5376] transition-colors hover:bg-[#FF3360] active:translate-y-1 sm:text-xs ${focusClass}`}><RotateCcw size={16} className="shrink-0" aria-hidden="true" />RETURN TO ARCADE LOBBY</button>
+        {onPlayAgain
+          ? <button type="button" onClick={onPlayAgain} className={`flex min-h-14 w-full items-center justify-center gap-2 rounded-xl border-b-4 border-[#B31D3F] bg-[#FF5376] px-3 py-4 font-pixel text-[9px] leading-loose text-white shadow-[0_0_15px_#FF5376] transition-colors hover:bg-[#FF3360] active:translate-y-1 sm:text-xs ${focusClass}`}><RotateCcw size={16} className="shrink-0" aria-hidden="true" />{playAgainLabel}</button>
+          : <p role="status" className={`text-center font-pixel text-[9px] leading-loose ${muted}`}>{waitingLabel}</p>}
       </section>
     </div>
   </main>;

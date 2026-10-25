@@ -1,0 +1,29 @@
+{
+  "name": "@game/web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 3000 --strictPort",
+    "build": "tsc --noEmit -p tsconfig.json && vite build",
+    "start": "vite preview --host 127.0.0.1 --port 3000 --strictPort",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@game/shared": "*",
+    "canvas-confetti": "^1.9.4",
+    "framer-motion": "^12.40.0",
+    "lucide-react": "^1.18.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "socket.io-client": "4.8.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.1",
+    "@types/canvas-confetti": "^1.9.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "tailwindcss": "^4.3.1",
+    "typescript": "^5.9.3",
+    "vite": "^8.0.12"
+  }
+}

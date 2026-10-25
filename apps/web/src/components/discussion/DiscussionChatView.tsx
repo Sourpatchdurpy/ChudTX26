@@ -44,8 +44,8 @@ export default function DiscussionChatView({
   isDarkMode, onToggleTheme, question, answers, messages, currentUserNickname,
   onSendMessage, onDiscussionEnd, initialSeconds = ROUND_SECONDS,
 }: DiscussionChatViewProps) {
-  // initialSeconds can resume a running round, but cannot extend it beyond 50s.
-  const [startSeconds] = useState(() => Number.isFinite(initialSeconds) ? Math.min(ROUND_SECONDS, Math.max(0, initialSeconds)) : ROUND_SECONDS);
+  // initialSeconds comes from the server, so the countdown matches the real phase (TIMER_SCALE included).
+  const [startSeconds] = useState(() => Number.isFinite(initialSeconds) ? Math.max(0, initialSeconds) : ROUND_SECONDS);
   const [remaining, setRemaining] = useState(Math.ceil(startSeconds));
   const [inputText, setInputText] = useState('');
   const [holding, setHolding] = useState(false);
@@ -98,10 +98,10 @@ export default function DiscussionChatView({
       const pending = pendingRef.current;
       if (!pending) return;
       setHoldSeconds(Math.max(0, Math.ceil((pending.releaseAt - now) / 1000)));
+      // The message was sent right away; the server holds it for everyone, so this is just the "sending…" state.
       if (now >= pending.releaseAt) {
         pendingRef.current = null;
         setHolding(false);
-        callbacksRef.current.onSendMessage?.(pending.text);
       }
     };
     const timer = setInterval(tick, 100);
@@ -122,6 +122,7 @@ export default function DiscussionChatView({
   function send() {
     if (!callbacksRef.current.onSendMessage || pendingRef.current || endedRef.current || deadlineRef.current === null || Date.now() >= deadlineRef.current || !inputText.trim() || charCount > CHARACTER_LIMIT) return;
     pendingRef.current = { text: inputText.trim(), releaseAt: Date.now() + HOLD_SECONDS * 1000 };
+    callbacksRef.current.onSendMessage(inputText.trim());
     setHolding(true);
     setHoldSeconds(HOLD_SECONDS);
     setInputText('');

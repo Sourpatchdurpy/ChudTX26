@@ -5,10 +5,10 @@ import type { RoundVoteModalProps } from '@/types/game';
 
 export type { RoundVoteModalProps, VoteOption, RoundVoteResult } from '@/types/game';
 
-const VOTE_SECONDS = 20;
 
-export default function RoundVoteModal({ isDarkMode, secondsRemaining, candidates, onCastVote, roundResult = null }: RoundVoteModalProps) {
-  const seconds = Number.isFinite(secondsRemaining) ? Math.min(VOTE_SECONDS, Math.max(0, Math.ceil(secondsRemaining))) : 0;
+export default function RoundVoteModal({ isDarkMode, secondsRemaining, candidates, onCastVote, roundResult = null, tally = null, title = 'VOTE THE IMPOSTER', description }: RoundVoteModalProps) {
+  const seconds = Number.isFinite(secondsRemaining) ? Math.max(0, Math.ceil(secondsRemaining)) : 0;
+  const [barSeconds] = useState(() => Math.max(1, seconds));
   const [selected, setSelected] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState('');
@@ -51,7 +51,7 @@ export default function RoundVoteModal({ isDarkMode, secondsRemaining, candidate
   useEffect(() => { if (roundResult) dialogRef.current?.focus(); }, [roundResult]);
 
   async function castVote(nickname: string) {
-    if (submittedRef.current || seconds <= 0 || roundResult || Date.now() >= deadlineRef.current) return;
+    if (submittedRef.current || seconds <= 0 || roundResult || tally || Date.now() >= deadlineRef.current) return;
     submittedRef.current = true;
     setSelected(nickname);
     setIsSending(true);
@@ -66,6 +66,7 @@ export default function RoundVoteModal({ isDarkMode, secondsRemaining, candidate
   }
 
   const isStalemate = roundResult && (roundResult.isTie || (!roundResult.wasAi && !roundResult.eliminatedNickname));
+  const maxVotes = Math.max(1, ...(tally ?? []).map(row => row.votes));
 
   return <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: reduceMotion ? 0 : 0.18 }} className="fixed inset-0 z-40 flex items-center justify-center overflow-y-auto bg-black/60 px-4 py-[max(1.5rem,env(safe-area-inset-top))] backdrop-blur-md">
     <motion.div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="round-vote-title" aria-describedby="round-vote-description" tabIndex={-1} initial={{ opacity: 0, scale: reduceMotion ? 1 : 0.96 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: reduceMotion ? 0 : 0.2 }} className={`relative my-auto flex max-h-[85dvh] w-full max-w-lg flex-col gap-5 rounded-2xl border-2 p-4 font-sans backdrop-blur-md focus:outline-none sm:p-6 ${isDarkMode ? 'border-[#00E5FF] bg-[#060B28]/85 text-white shadow-[0_0_30px_#00E5FF50]' : 'border-[#16223B]/80 bg-[#FFF1DC]/90 text-[#0E1726] shadow-[0_0_30px_#FFAE7060]'}`}>
@@ -75,17 +76,27 @@ export default function RoundVoteModal({ isDarkMode, secondsRemaining, candidate
       <span aria-hidden="true" className="pointer-events-none absolute -bottom-1 -right-1 h-4 w-4 border-b-2 border-r-2 border-white" />
       <header className="shrink-0 space-y-3">
         <div className="flex items-start justify-between gap-3">
-          <h2 id="round-vote-title" className={`font-pixel text-xs leading-loose sm:text-sm ${accent}`}>VOTE THE IMPOSTER</h2>
+          <h2 id="round-vote-title" className={`font-pixel text-xs leading-loose sm:text-sm ${accent}`}>{title}</h2>
           <span role="timer" aria-label={`${seconds} seconds remaining`} className={`shrink-0 font-pixel text-xs ${isDarkMode ? 'text-[#FF8CA4]' : 'text-[#9E173B]'}`}>{seconds}s</span>
         </div>
         <motion.div aria-hidden="true" initial={false} animate={reduceMotion || roundResult || seconds === 0 ? { opacity: 1 } : { opacity: [1, 0.55, 1] }} transition={{ duration: 1, repeat: Infinity }} className={`h-2 overflow-hidden border ${isDarkMode ? 'border-[#FF5376]/40 bg-black/30' : 'border-[#9E173B]/30 bg-white/20'}`}>
-          <motion.div initial={false} animate={{ width: `${seconds / VOTE_SECONDS * 100}%` }} transition={{ duration: reduceMotion ? 0 : 0.2 }} className="h-full bg-[#FF5376]" />
+          <motion.div initial={false} animate={{ width: `${Math.min(100, seconds / barSeconds * 100)}%` }} transition={{ duration: reduceMotion ? 0 : 0.2 }} className="h-full bg-[#FF5376]" />
         </motion.div>
-        <p id="round-vote-description" className={`text-xs leading-relaxed ${muted}`}>{roundResult ? 'The votes are in.' : 'Choose the codename you believe belongs to the AI. Your vote locks when selected.'}</p>
+        <p id="round-vote-description" className={`text-xs leading-relaxed ${muted}`}>{roundResult || tally ? 'The votes are in.' : description ?? 'Choose the codename you believe belongs to the AI. Your vote locks when selected.'}</p>
       </header>
 
       <AnimatePresence mode="wait" initial={false}>
-        {roundResult ? <motion.div key="result" role="status" initial={{ opacity: 0, scale: reduceMotion ? 1 : 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: reduceMotion ? 0 : 0.25 }} className={`flex min-h-48 min-w-0 flex-col items-center justify-center gap-4 overflow-y-auto rounded-xl border-2 p-5 text-center ${isStalemate ? (isDarkMode ? 'border-[#00E5FF]/50 bg-[#00E5FF]/5' : 'border-[#16223B]/40 bg-white/20') : roundResult.wasAi ? 'border-[#38EF7D] bg-[#38EF7D]/10' : 'border-[#FF5376] bg-[#FF5376]/10'}`}>
+        {tally ? <motion.div key="tally" role="status" initial={{ opacity: 0, scale: reduceMotion ? 1 : 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: reduceMotion ? 0 : 0.25 }} className={`flex min-w-0 flex-col gap-4 overflow-y-auto rounded-xl border-2 p-5 ${isDarkMode ? 'border-[#00E5FF]/50 bg-[#00E5FF]/5' : 'border-[#16223B]/40 bg-white/20'}`}>
+          <p className={`font-pixel text-xs leading-loose ${accent}`}>[ VOTES ARE IN ]</p>
+          <ul aria-label="Votes per codename" className="space-y-2">
+            {[...tally].sort((a, b) => b.votes - a.votes).map(row => <li key={row.nickname} className="flex items-center gap-3">
+              <span className={`w-28 shrink-0 break-words font-pixel text-[9px] leading-loose ${accent}`}>{row.nickname}</span>
+              <span aria-hidden="true" className={`h-3 flex-1 overflow-hidden border ${isDarkMode ? 'border-[#FF5376]/40 bg-black/30' : 'border-[#9E173B]/30 bg-white/20'}`}><motion.span initial={false} animate={{ width: `${row.votes / maxVotes * 100}%` }} transition={{ duration: reduceMotion ? 0 : 0.4 }} className="block h-full bg-[#FF5376]" /></span>
+              <span className="w-8 shrink-0 text-right font-pixel text-[9px]">{row.votes}</span>
+            </li>)}
+          </ul>
+          <p className={`text-sm ${muted}`}>Nobody leaves. Only the final vote in round 3 decides the game.</p>
+        </motion.div> : roundResult ? <motion.div key="result" role="status" initial={{ opacity: 0, scale: reduceMotion ? 1 : 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: reduceMotion ? 0 : 0.25 }} className={`flex min-h-48 min-w-0 flex-col items-center justify-center gap-4 overflow-y-auto rounded-xl border-2 p-5 text-center ${isStalemate ? (isDarkMode ? 'border-[#00E5FF]/50 bg-[#00E5FF]/5' : 'border-[#16223B]/40 bg-white/20') : roundResult.wasAi ? 'border-[#38EF7D] bg-[#38EF7D]/10' : 'border-[#FF5376] bg-[#FF5376]/10'}`}>
           <p className={`break-words font-pixel text-xs leading-loose sm:text-sm ${isStalemate ? accent : roundResult.wasAi ? (isDarkMode ? 'text-[#38EF7D] [text-shadow:0_0_12px_#38EF7D60]' : 'text-[#126438]') : (isDarkMode ? 'text-[#FF8CA4]' : 'text-[#9E173B]')}`}>
             {isStalemate ? '[ STALEMATE: NO CONSENSUS ]' : roundResult.wasAi ? '[ IMPOSTER DETECTED // PROTOCOL BREACHED ]' : `[ ${roundResult.eliminatedNickname} IS HUMAN // CLEARED ]`}
           </p>

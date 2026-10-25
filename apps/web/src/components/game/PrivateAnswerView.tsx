@@ -19,7 +19,7 @@ function PrivateAnswerRound({
   isDarkMode, onToggleTheme, roundNumber, roundTier, question, totalPlayers,
   answeredCount, initialSeconds = ROUND_SECONDS, onSubmitAnswer, onTimeUp,
 }: PrivateAnswerViewProps) {
-  const [startSeconds] = useState(() => Number.isFinite(initialSeconds) ? Math.max(0, Math.min(ROUND_SECONDS, initialSeconds)) : ROUND_SECONDS);
+  const [startSeconds] = useState(() => Number.isFinite(initialSeconds) ? Math.max(0, initialSeconds) : ROUND_SECONDS);
   const [remaining, setRemaining] = useState(Math.ceil(startSeconds));
   const [text, setText] = useState('');
   const [lockedAnswer, setLockedAnswer] = useState<string | null>(null);
