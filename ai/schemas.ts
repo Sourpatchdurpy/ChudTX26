@@ -7,8 +7,7 @@ const arr=(minItems:number,maxItems?:number):Schema=>({type:"array",items:str(),
 const object=(properties:Record<string,Schema>):Schema=>({type:"object",properties,required:Object.keys(properties),additionalProperties:false});
 export const personaSchema=object({age:{type:"integer",minimum:18,maximum:24},
   school:{type:["string","null"]},year:{type:["string","null"]},major:{type:["string","null"]},hometown:str(),
-  interests:arr(2),opinions:arr(3),facts:arr(8),thisWeek:arr(2,4),
-  style:object({casing:{type:"string",enum:["lowercase","mixed"]},emojiRate:{type:"number",minimum:0,maximum:1},punctuation:{type:"string",enum:["minimal","normal"]}}),blurb:str(180)});
+  interests:arr(2),opinions:arr(3),facts:arr(8),thisWeek:arr(2,4),blurb:str(180)});
 export function outputSchema(mode:AiMode):Schema {
   return mode==="answer"?object({answer:str(LIMITS.answerMaxChars),note:str(100)}):mode==="collab"?object({result:str(LIMITS.collabMaxChars),note:str(100)}):
     object({action:{type:"string",enum:["send","skip"]},message:str(LIMITS.chatMaxChars),note:str(100)});

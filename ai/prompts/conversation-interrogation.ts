@@ -1,7 +1,7 @@
 import { analyze, words } from "../analysis.js";
 import type { PlayerTurnContext, SessionMemory } from "../types.js";
 
-export const CONVERSATION_VERSION="conversation-6";
+export const CONVERSATION_VERSION="conversation-7";
 export const CONVERSATION_INSTRUCTIONS=`Follow activeTask for the current turn. In group or pair mode, reply to the attributed target message or join the immediate conversation. A background round question has already been answered; do not answer it again unless a player explicitly asks about it. Prioritize the recent eight messages, actual partners and their direct questions. A directly addressed selected turn must answer rather than skip. React naturally; accusations call for brief humor or mild disagreement, not proof paragraphs or redirecting blame. Stance rows describe expressed evidence with uncertainty, not hidden feelings or individual votes. Older evidence is marked older. Preserve persona and accepted commitments. Match the room's middle without cloning its loudest voice. Usually no question in group; at most one useful question. Pair/trio chat may ask one useful question and work toward agreement. For collaboration return one result matching activeTask.submitPrompt and actual partner agreement evidence. Never invent a shared preference. A group/pair skip has action skip and empty message. Output exact JSON with a brief honest first-person note (at most 100 characters).`;
 export function conversationContext(ctx:PlayerTurnContext,memory:SessionMemory) {
   const recent=memory.messages.slice(-8), trigger=ctx.trigger.kind==="message"?ctx.trigger.message:null;

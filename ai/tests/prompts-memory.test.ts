@@ -13,24 +13,23 @@ import type { MuseCall } from "@game/shared";
 
 test("five complete independent student and nonstudent personas",()=>{
   const pool=fallbackPersonaSamples();assert.equal(pool.length,5);assert.equal(new Set(pool.map(p=>p.blurb)).size,5);
-  for(const p of pool){assert.equal("name" in p,false);assert.equal("slang" in p.style,false);assert.equal("hackathonStory" in p,false);normalizePersona({...p,school:p.school??null,year:p.year??null,major:p.major??null});}
+  for(const p of pool){assert.equal("name" in p,false);assert.equal("style" in p,false);assert.equal("hackathonStory" in p,false);normalizePersona({...p,school:p.school??null,year:p.year??null,major:p.major??null});}
   assert.ok(pool.some(p=>!p.school&&!p.year&&!p.major));pool[0]!.facts[0]="mutated";assert.notEqual(fallbackPersonaSamples()[0]!.facts[0],"mutated");
   assert.throws(()=>normalizePersona({...pool[0],hackathonStory:"removed"}));
   assert.throws(()=>normalizePersona({...pool[0],school:null,year:null,major:null,name:"Removed Name"}));
   assert.equal("name" in (personaSchema.properties as object),false);
 });
-test("persona generation excludes slang preferences and rejects the removed style field",async()=>{
+test("persona generation excludes all style preferences and rejects the removed style field",async()=>{
   const generated={...fallbackPersonaSamples()[0]!,school:null,year:null,major:null};
-  const styleSchema=(personaSchema.properties as Record<string,{properties:object;required:string[]}>).style!;
-  assert.equal("slang" in styleSchema.properties,false);assert.ok(!styleSchema.required.includes("slang"));
-  assert.throws(()=>normalizePersona({...generated,style:{...generated.style,slang:["tbh"]}}),/unexpected/);
+  assert.equal("style" in (personaSchema.properties as object),false);assert.ok(!(personaSchema.required as string[]).includes("style"));
+  assert.throws(()=>normalizePersona({...generated,style:{casing:"lowercase",emojiRate:0.1,punctuation:"minimal"}}),/unexpected/);
   const world={fetchedAt:0,trending:[],news:[],local:[],weather:null,hacktx:[]};
   let generationInstructions="";
   const call:MuseCall=async<T>(request:Parameters<MuseCall>[0])=>{generationInstructions=request.messages[1]!.content;return generated as T;};
-  const p=await generatePersona(world,call);assert.equal("slang" in p.style,false);
-  assert.ok(generationInstructions.includes("Do not generate slang preferences"));
+  const p=await generatePersona(world,call);assert.equal("style" in p,false);
+  assert.ok(generationInstructions.includes("Do not generate a style section"));
   const serialized=buildGroupChatRequest(fixture("discuss-addressed")).messages[0]!.content;
-  assert.ok(!serialized.includes('"slang":'));
+  assert.ok(!serialized.includes('"style":'));
 });
 test("persona generation normalizes nullable nonstudent education and falls back on invalid objects",async()=>{
   const generated={...fallbackPersonaSamples()[2]!,school:null,year:null,major:null};

@@ -1,5 +1,13 @@
 # Development tuning log
 
+## Infer writing style from game history
+
+- Removed the entire `Persona.style` section from the shared contract, generation schema/instructions, fallback personas, serialized persona prompts and readiness freezing. Returned style sections are rejected.
+- Added `writing-style.ts` to derive request-local casing/punctuation/emoji measurements from eligible human answer examples or visible message history. Established partner/trigger-author habits take priority; profiles with fewer than five observations use the recent room baseline. Empty histories use neutral writing. The same measurements drive prompts and cleanup, independently of caller-provided legacy defaults.
+- Prompts include observed per-player writing habits and never use biography capitalization or grammatical examples as a casing baseline. First-question private examples remain request-local. Versions are `qa-6` and `conversation-7`.
+- Added regression coverage for schema/fallback removal, formal versus lowercase histories, changed questioners, sparse profiles, AI exclusion, first-question privacy and empty history. No live API calls were made.
+- Verification: root typecheck and all 71 mocked tests pass, including prompt and cleanup behavior for differing observed casing/punctuation habits.
+
 ## Remove persona slang preferences
 
 - Removed `style.slang` from the shared persona type, generation schema, normalization, all five fallback sheets, prompt serialization and readiness freezing. Persona generation requests plain language with no slang preferences, lists or catchphrases.

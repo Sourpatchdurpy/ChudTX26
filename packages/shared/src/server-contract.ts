@@ -102,11 +102,6 @@ export interface Persona {
   opinions: string[]; // a few strong, specific takes
   facts: string[]; // concrete biographical details to stay consistent with
   thisWeek: string[]; // things they did/saw this week, grounded in WorldContext
-  style: {
-    casing: "lowercase" | "mixed";
-    emojiRate: number; // average emojis per message, e.g. 0.2
-    punctuation: "minimal" | "normal";
-  };
   blurb: string; // name-free reveal description, e.g. "geography student from San Marcos"
   /** Part 2 may add fields here without a contract change. */
   extra?: Record<string, unknown>;
