@@ -15,20 +15,21 @@ import { randomPairing } from "./pairing.js";
 import { clamp, pick, rand } from "./random.js";
 
 export const STUB_PERSONA: Persona = {
-  name: "Jordan",
   age: 20,
   school: "UT Austin",
   year: "sophomore",
   major: "computer science",
   hometown: "Houston",
-  hackathonStory: "came with two roommates, building a study-group matcher, running on one donut and spite",
   interests: ["bouldering", "indie games", "making way too much cold brew"],
   opinions: ["breakfast tacos are the best breakfast, not up for debate", "group projects should be illegal"],
   facts: ["has a cat named Pixel back home", "works the front desk at PCL"],
   thisWeek: ["got lost in GDC looking for a bathroom", "had Round Rock Donuts for dinner"],
   style: { casing: "lowercase", emojiRate: 0.2, slang: ["ngl", "lowkey", "fr"], punctuation: "minimal" },
-  blurb: "Jordan, sophomore CS from Houston",
+  blurb: "sophomore CS student from Houston",
 };
+
+/** Synchronous readiness-fallback supplier (same name as src/ai/index.ts). */
+export const fallbackPersona = (): Persona => structuredClone(STUB_PERSONA);
 
 const ANSWERS: Record<string, string[]> = {
   light: [
@@ -77,9 +78,12 @@ export const createAiPlayer: CreateAiPlayer = ({ aiPlayerId, persona, actions })
   const partners = (view: RoomView): PlayerId[] =>
     view.pairs?.find((p) => p.members.includes(aiPlayerId))?.members.filter((id) => id !== aiPlayerId) ?? [];
 
+  let nickname = "";
+
   return {
     onEvent(event, view) {
       if (disposed) return;
+      nickname = view.me?.nickname ?? nickname;
       if (event.type === "phaseChanged") {
         const left = msLeft(view);
         switch (event.phase) {
@@ -125,7 +129,8 @@ export const createAiPlayer: CreateAiPlayer = ({ aiPlayerId, persona, actions })
         { round: 1, text: "said tacos because everyone in texas says tacos" },
         { round: 3, text: "vouched for my partner, felt rude not to" },
       ];
-      return { persona: { name: persona.name, blurb: persona.blurb }, notes };
+      // Personas have no name: the reveal shows the AI's game nickname.
+      return { persona: { name: nickname, blurb: persona.blurb }, notes };
     },
     dispose() {
       disposed = true;

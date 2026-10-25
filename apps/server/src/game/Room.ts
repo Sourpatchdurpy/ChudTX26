@@ -47,11 +47,13 @@ export interface Seat {
   connected: boolean;
 }
 
-/** The three names exported by both src/ai/index.ts and game/stubAi.ts. */
+/** The names exported by both src/ai/index.ts and game/stubAi.ts. */
 export interface AiImpl {
   createAiPlayer: CreateAiPlayer;
   prepareAiPersona: PrepareAiPersona;
   runMatchmaker: RunMatchmaker;
+  /** Synchronous persona used when preparation misses the readiness deadline (PART_2_DESIGN §3.3). */
+  fallbackPersona?: () => Persona;
 }
 
 /** How a room talks to sockets. Injected so tests can run without Socket.IO. */
@@ -107,6 +109,8 @@ export class Room {
 
   ai: AiPlayer | null = null;
   aiId: PlayerId | null = null;
+  /** New for every game (Play Again included), so a late AI result can't touch the next game. */
+  sessionGeneration = "";
   personaPromise: Promise<Persona> | null = null;
   personaAbort: AbortController | null = null;
   matchmakerPromise: Promise<MatchmakerOutput | null> | null = null;
@@ -117,6 +121,7 @@ export class Room {
 
   private aiQueue: GameEvent[] = [];
   private aiDrainScheduled = false;
+  private firstQuestionRevision = -1;
 
   constructor(
     readonly code: RoomCode,
@@ -216,21 +221,32 @@ export class Room {
     if (this.humans().length < LIMITS.minHumans) return fail(`Need at least ${LIMITS.minHumans} players to start.`);
 
     this.busy = true;
-    let persona: Persona = STUB_PERSONA;
+    let persona: Persona | null = null;
     try {
       if (this.personaPromise) persona = await withTimeout(this.personaPromise, PERSONA_WAIT_MS, "persona");
     } catch (e) {
-      this.log(`persona not ready, using STUB_PERSONA (${errMsg(e)})`);
+      this.log(`persona not ready, using the fallback persona (${errMsg(e)})`);
     } finally {
       this.busy = false;
     }
     if (this.closed) return fail("Room closed.");
     if (this.phase !== "lobby") return fail("The game has already started.");
+    if (!persona) {
+      // Readiness deadline: freeze the fallback and stop preparing; a late result is ignored.
+      this.personaAbort?.abort();
+      try {
+        persona = this.deps.ai.fallbackPersona?.() ?? STUB_PERSONA;
+      } catch (e) {
+        this.log(`fallbackPersona threw, using STUB_PERSONA: ${errMsg(e)}`);
+        persona = STUB_PERSONA;
+      }
+    }
 
     const aiSeat: Seat = {
       id: nanoid(10),
       token: nanoid(21),
-      realName: persona.name,
+      // Personas have no name: the AI is known only by its nickname, and the reveal uses that.
+      realName: "",
       isAi: true,
       isHost: false,
       socketIds: new Set(),
@@ -244,9 +260,12 @@ export class Room {
       s.emoji = names[i]!.emoji;
     });
     this.seats = shuffle(this.seats);
+    this.sessionGeneration = nanoid(12);
+    this.firstQuestionRevision = -1;
 
     try {
       this.ai = this.deps.ai.createAiPlayer({
+        sessionGeneration: this.sessionGeneration,
         roomCode: this.code,
         aiPlayerId: aiSeat.id,
         persona,
@@ -261,6 +280,7 @@ export class Room {
 
     beginRound(this, 1);
     enterPhase(this, "answer");
+    this.publishFirstQuestionAnswers();
     return { ok: true };
   }
 
@@ -274,6 +294,7 @@ export class Room {
     if (text.length > LIMITS.answerMaxChars) return fail(`Answer must be at most ${LIMITS.answerMaxChars} characters.`);
     this.answers.set(id, text);
     this.touch();
+    if (!this.seat(id)!.isAi) this.publishFirstQuestionAnswers();
     if (this.answers.size >= this.seats.length) this.shortenPhase(ALL_ANSWERED_GRACE_MS);
     return { ok: true };
   }
@@ -510,6 +531,34 @@ export class Room {
         this.log(`ai.onEvent(${event.type}) threw: ${errMsg(e)}`);
       }
     }
+  }
+
+  /**
+   * Round 1 only: the humans' submitted answers so far, sent privately to the AI
+   * controller so it can answer in the room's style (PART_2_DESIGN §3.8.1). It
+   * goes through the AI's internal event queue only, never into a RoomView or a
+   * socket. Sent once when round 1's answer phase opens, then after every
+   * accepted human submission; AI submissions don't trigger it.
+   */
+  private publishFirstQuestionAnswers(): void {
+    if (!this.ai || !this.aiId || this.phase !== "answer" || this.roundNumber !== 1 || !this.currentRound) return;
+    const humans = this.humans();
+    const answers = humans
+      .filter((s) => this.answers.has(s.id))
+      .map((s) => ({ playerId: s.id, nickname: s.nickname ?? "", text: this.answers.get(s.id)! }));
+    this.queueAiEvent({
+      type: "firstQuestionAnswersUpdated",
+      snapshot: {
+        sessionGeneration: this.sessionGeneration,
+        round: 1,
+        promptId: this.currentRound.promptId,
+        question: this.currentRound.prompt,
+        revision: ++this.firstQuestionRevision,
+        humanPlayerIds: humans.map((s) => s.id),
+        submittedCount: answers.length,
+        answers,
+      },
+    });
   }
 
   private aiActions(aiId: PlayerId): AiActions {

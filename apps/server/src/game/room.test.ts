@@ -73,9 +73,35 @@ describe("lobby", () => {
   });
 
   test("a rejected persona falls back to STUB_PERSONA", async () => {
-    const { room, start } = setup({ humans: 3, persona: () => Promise.reject(new Error("muse down")) });
+    const { room, fake, start } = setup({ humans: 3, persona: () => Promise.reject(new Error("muse down")) });
     await start();
-    assert.equal(room.seat(room.aiId!)!.realName, STUB_PERSONA.name);
+    assert.deepEqual(fake.init?.persona, STUB_PERSONA);
+    assert.equal(room.seat(room.aiId!)!.realName, "", "personas have no name; the AI is known by its nickname");
+    assert.ok(fake.init?.sessionGeneration);
+  });
+
+  test("round 1 sends the AI a private snapshot of human answers, never in any view", async () => {
+    const { room, humans, fake, sent, start } = setup({ humans: 3 });
+    await start();
+    await flush();
+    const snapshots = () =>
+      fake.events.flatMap((e) => (e.type === "firstQuestionAnswersUpdated" ? [e.snapshot] : []));
+    assert.equal(snapshots().length, 1, "initial snapshot when round 1 opens");
+    assert.deepEqual([snapshots()[0]!.revision, snapshots()[0]!.submittedCount], [0, 0]);
+
+    assert.ok(room.submitAnswer(humans[1]!.id, "tacodeli migas").ok);
+    assert.ok(fake.actions!.submitAnswer("ai answer").ok);
+    await flush();
+    const last = snapshots().at(-1)!;
+    assert.equal(snapshots().length, 2, "a human submission updates it; the AI's own does not");
+    assert.equal(last.revision, 1);
+    assert.equal(last.sessionGeneration, fake.init!.sessionGeneration);
+    assert.deepEqual(last.answers.map((a) => a.text), ["tacodeli migas"]);
+    assert.ok(!last.humanPlayerIds.includes(room.aiId!));
+    assert.equal(last.humanPlayerIds.length, 3);
+    const othersViews = [...sent].filter(([socket]) => socket !== humans[1]!.socket).map(([, views]) => views);
+    assert.ok(othersViews.length > 0, "other players received views");
+    assert.ok(!JSON.stringify(othersViews).includes("tacodeli migas"), "only its author sees an answer during answer");
   });
 });
 

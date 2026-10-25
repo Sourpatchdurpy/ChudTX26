@@ -4,6 +4,7 @@
 import type {
   AiActions,
   AiPlayer,
+  AiPlayerInit,
   GameEvent,
   MatchmakerOutput,
   Persona,
@@ -23,6 +24,7 @@ export interface FakeAi {
   lastView: RoomView | null;
   actions: AiActions | null;
   disposed: boolean;
+  init: AiPlayerInit | null;
 }
 
 export interface TestRoomOptions {
@@ -38,14 +40,15 @@ export function makeRoom(opts: TestRoomOptions = {}) {
   const sent = new Map<string, RoomView[]>();
   const closedSockets: { socketId: string; reason: string }[] = [];
   const logs: string[] = [];
-  const fake: FakeAi = { events: [], lastView: null, actions: null, disposed: false };
+  const fake: FakeAi = { events: [], lastView: null, actions: null, disposed: false, init: null };
 
   const ai: AiImpl = {
     prepareAiPersona: opts.persona ?? (async () => STUB_PERSONA),
     runMatchmaker: opts.matchmaker ?? stubMatchmaker,
-    createAiPlayer: ({ actions }) => {
+    createAiPlayer: (init) => {
       if (opts.createThrows) throw new Error("boom: createAiPlayer");
-      fake.actions = actions;
+      fake.init = init;
+      fake.actions = init.actions;
       if (opts.player) return opts.player(fake);
       return {
         onEvent(event, view) {
