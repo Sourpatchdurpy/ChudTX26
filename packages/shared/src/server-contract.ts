@@ -105,7 +105,6 @@ export interface Persona {
   style: {
     casing: "lowercase" | "mixed";
     emojiRate: number; // average emojis per message, e.g. 0.2
-    slang: string[]; // a few words they actually use
     punctuation: "minimal" | "normal";
   };
   blurb: string; // name-free reveal description, e.g. "geography student from San Marcos"

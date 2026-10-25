@@ -13,11 +13,24 @@ import type { MuseCall } from "@game/shared";
 
 test("five complete independent student and nonstudent personas",()=>{
   const pool=fallbackPersonaSamples();assert.equal(pool.length,5);assert.equal(new Set(pool.map(p=>p.blurb)).size,5);
-  for(const p of pool){assert.equal("name" in p,false);assert.equal("hackathonStory" in p,false);normalizePersona({...p,school:p.school??null,year:p.year??null,major:p.major??null});}
+  for(const p of pool){assert.equal("name" in p,false);assert.equal("slang" in p.style,false);assert.equal("hackathonStory" in p,false);normalizePersona({...p,school:p.school??null,year:p.year??null,major:p.major??null});}
   assert.ok(pool.some(p=>!p.school&&!p.year&&!p.major));pool[0]!.facts[0]="mutated";assert.notEqual(fallbackPersonaSamples()[0]!.facts[0],"mutated");
   assert.throws(()=>normalizePersona({...pool[0],hackathonStory:"removed"}));
   assert.throws(()=>normalizePersona({...pool[0],school:null,year:null,major:null,name:"Removed Name"}));
   assert.equal("name" in (personaSchema.properties as object),false);
+});
+test("persona generation excludes slang preferences and rejects the removed style field",async()=>{
+  const generated={...fallbackPersonaSamples()[0]!,school:null,year:null,major:null};
+  const styleSchema=(personaSchema.properties as Record<string,{properties:object;required:string[]}>).style!;
+  assert.equal("slang" in styleSchema.properties,false);assert.ok(!styleSchema.required.includes("slang"));
+  assert.throws(()=>normalizePersona({...generated,style:{...generated.style,slang:["tbh"]}}),/unexpected/);
+  const world={fetchedAt:0,trending:[],news:[],local:[],weather:null,hacktx:[]};
+  let generationInstructions="";
+  const call:MuseCall=async<T>(request:Parameters<MuseCall>[0])=>{generationInstructions=request.messages[1]!.content;return generated as T;};
+  const p=await generatePersona(world,call);assert.equal("slang" in p.style,false);
+  assert.ok(generationInstructions.includes("Do not generate slang preferences"));
+  const serialized=buildGroupChatRequest(fixture("discuss-addressed")).messages[0]!.content;
+  assert.ok(!serialized.includes('"slang":'));
 });
 test("persona generation normalizes nullable nonstudent education and falls back on invalid objects",async()=>{
   const generated={...fallbackPersonaSamples()[2]!,school:null,year:null,major:null};
@@ -37,13 +50,22 @@ test("every gameplay prompt uses the assigned nickname for self-identification",
   for(const request of [buildAnswerRequest(answer),buildGroupChatRequest(group),buildPairChatRequest(pair),buildCollabRequest(collab)]) {
     const instructions=request.messages[0]!.content;
     assert.ok(instructions.includes('Your game-assigned nickname is "Fox"'));
-    assert.ok(instructions.includes("always use this game-assigned nickname"));
+    assert.ok(instructions.includes("Speak as yourself in first person"));
     assert.ok(instructions.includes("Your persona has no personal name; never invent or adopt one"));
-    assert.ok(instructions.includes("Natural first-person pronouns (I, me, my) are fine"));
+    assert.ok(instructions.includes("Only when someone explicitly asks your name or nickname"));
+    assert.ok(instructions.includes("do not add unsolicited identity corrections"));
+    const data=JSON.parse(request.messages[1]!.content);
+    assert.deepEqual(data.self,{playerId:"ai",nickname:"Fox",role:"you",perspective:"first person"});
   }
   const renamed=buildGroupChatRequest({...group,myNickname:"Otter"});
   assert.ok(renamed.messages[0]!.content.includes('Your game-assigned nickname is "Otter"'));
   assert.ok(!renamed.messages[0]!.content.includes('Your game-assigned nickname is "Fox"'));
+});
+test("conversation transcript marks the AI's own messages as you without adding speaker labels to text",()=>{
+  const ctx=fixture("collab-result"),data=JSON.parse(buildCollabRequest(ctx).messages[1]!.content);
+  const own=data.recentMessages.find((m:{from:string})=>m.from==="ai");
+  assert.equal(own.speaker,"you");assert.equal(own.nickname,"Fox");assert.equal(own.text,"same, let's put cooking as our thing");
+  assert.equal(data.recentMessages[0].speaker,"other-player");
 });
 test("discussion task targets its scenario instead of inheriting the food-answer task",()=>{
   for(const name of ["accused-1","accused-2","discuss-addressed","persona-consistency","complex-accusation"]) {

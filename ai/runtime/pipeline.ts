@@ -4,7 +4,7 @@ import { buildRequest } from "../prompts.js";
 import { humanize } from "../humanize.js";
 import { fallbackText } from "../fallbacks.js";
 import { outputSchema, schemaError } from "../schemas.js";
-import { validateOutput } from "../validate.js";
+import { validateOutput, validatePerspective } from "../validate.js";
 import type { PlayerTurnContext } from "../types.js";
 import { abortable, throwIfAborted } from "./abort.js";
 
@@ -18,6 +18,7 @@ export function validateStructuredOutput(value:unknown,mode:AiMode,ctx:PlayerTur
   }
   const raw=obj[mode==="answer"?"answer":mode==="collab"?"result":"message"]!;
   const before=validateOutput(raw);if(!before.ok)throw new Error(before.reason);
+  const perspective=validatePerspective(raw,ctx);if(!perspective.ok)throw new Error(perspective.reason);
   const text=humanize(raw,ctx.style,ctx.persona),valid=validateOutput(text);
   const limit=mode==="answer"?LIMITS.answerMaxChars:mode==="collab"?LIMITS.collabMaxChars:LIMITS.chatMaxChars;
   if(!valid.ok||text.length>limit)throw new Error(valid.ok?"mode character limit":valid.reason);

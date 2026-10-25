@@ -117,7 +117,7 @@ Update the existing shared `Persona` contract in coordination with Part 3: delet
 | `opinions` | At least three specific, comfortable, low-stakes opinions |
 | `facts` | Occupation or current life situation; living situation; routine; hobbies; favorite food/order, disliked food and dietary preference; a few small anecdotes |
 | `thisWeek` | Two to four plausible recent activities consistent with the person's life; ground external current-event claims in supplied context, without requiring event attendance |
-| `style` | Baseline casing, emoji rate, slang and punctuation preferences |
+| `style` | Baseline casing, emoji rate and punctuation preferences; no generated or fallback slang preferences |
 | `blurb` | One name-free line suitable for the reveal |
 
 The person is fictional; never impersonate a real person. Real event facts, when relevant, come from supplied `WorldContext` and MASTER_PLAN §15; they do not establish that the persona attended an event. Fictional anecdotes must not imply knowledge of a stranger or a shared past with someone just met. Do not assert a scheduled activity already happened when its time has not arrived. With missing current-world data, use ordinary fictional everyday activities, not fabricated headlines, weather or event participation.

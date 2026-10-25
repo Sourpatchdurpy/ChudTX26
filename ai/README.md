@@ -18,6 +18,10 @@ The two editable gameplay templates are `prompts/question-answer.ts` and `prompt
 
 Personas have no `name` field. Generation schemas reject it, the fallback sheets and blurbs contain no personal names, and gameplay uses only the game-assigned nickname. The existing reveal payload's display `name` is populated from that nickname, rather than generated persona data.
 
+Persona style contains only `casing`, `emojiRate` and `punctuation`. There is no `slang` field in generation, fallback sheets or serialized persona prompts; returned slang preferences are rejected by the strict schema. Room-style analysis still measures actual human expressions.
+
+Self-references use first person (`I/me/my`, or `we/us/our` for shared agreements). Requests explicitly mark the AI's seat as `self` and its visible chat as `speaker: "you"`. The nickname is only stated when a player explicitly asks for a name; addressing or accusing the AI does not call for an introduction. Context-aware validation catches common third-person nickname narration and unsolicited nickname introductions, using the existing bounded regeneration/fallback path instead of rewriting facts. These deterministic checks cover clear patterns, not every possible grammatical construction.
+
 Every request identifies its current `activeTask`. Answer mode targets the round question. Group/pair chat targets an attributed player message or joins the conversation; a group round question is labeled `roundBackground` with status `already-answered`. Collaboration mode targets the card's result submission. Conversation `round` metadata does not contain an unlabeled question to answer. Group fixtures use scenario-specific round context, and pair messages come only from actual pair members.
 
 ## Server handoff

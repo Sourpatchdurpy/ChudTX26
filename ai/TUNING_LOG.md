@@ -1,5 +1,19 @@
 # Development tuning log
 
+## Remove persona slang preferences
+
+- Removed `style.slang` from the shared persona type, generation schema, normalization, all five fallback sheets, prompt serialization and readiness freezing. Persona generation requests plain language with no slang preferences, lists or catchphrases.
+- Existing human-message style measurements remain observational; persona data no longer supplies a slang vocabulary to generation. Prompt versions are `qa-5` and `conversation-6`.
+- Added checks for absent slang fields in every fallback and the generation schema, rejection of returned slang preferences, generation instructions and serialized prompt data. No live calls were made.
+
+## First-person self-reference
+
+- Replaced the nickname-heavy identity instruction with explicit first-person perspective and direct answers without unsolicited introductions or identity corrections. Nicknames are used to answer explicit name questions only. Both families share this rule; versions are `qa-4` and `conversation-5`.
+- Requests identify the AI's seat in `self`; recent transcript messages identify its own contributions as `speaker: "you"`. Removed a fixture's embedded `Fox:` speaker prefix.
+- Added narrow context-aware validation for third-person narration using the AI's own nickname and unsolicited nickname introductions. Invalid drafts use the existing single regeneration or fallback, without automatic pronoun/fact rewriting. Regression checks cover the reported examples, first-person alternatives, another player's name, changed nicknames, explicit name questions and successful regeneration.
+- No live provider calls were made; live quality/humanness evaluation for this prompt change remains pending.
+- Verification: root typecheck and all 65 mocked regression tests pass, including rejection of both reported response patterns and successful first-person regeneration.
+
 ## Remove generated persona names
 
 - Removed `Persona.name` from the shared server-only persona contract, generation schema, normalization, prompt serialization and all five fallback sheets. Removed personal names from fallback blurbs and instructed generation to avoid names throughout its fact sheet.

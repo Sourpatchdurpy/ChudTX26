@@ -54,6 +54,26 @@ test("structured validators reject strings, extra keys, bad skip, note and mode 
     {action:"send",message:"hi",note:"n".repeat(101)},{action:"send",message:"x".repeat(201),note:"x"},{action:"send",message:"- first\n- second",note:"x"}])assert.throws(()=>validateStructuredOutput(value,"group",ctx));
   assert.equal(validateStructuredOutput({action:"skip",message:"",note:"I waited"},"group",{...ctx,addressedToMe:false}).action,"skip");
 });
+test("perspective validation rejects third-person self-reference and unsolicited identity corrections",()=>{
+  const ctx=fixture("accused-2");
+  for(const text of ["nah Fox works two afternoons at the library tbh","lol that wasnt me tbh, im Fox","Fox's job is at the library","Fox: i work afternoons"]) {
+    assert.throws(()=>validateStructuredOutput({action:"send",message:text,note:"I clarified my routine"},"group",ctx),/third-person|unsolicited/);
+  }
+  for(const text of ["i work two afternoons at the library","my shifts are in the afternoon","we both like cooking","Owl works mornings"]) {
+    assert.doesNotThrow(()=>validateStructuredOutput({action:"send",message:text,note:"I answered directly"},"group",ctx));
+  }
+  const naming=structuredClone(ctx);naming.trigger={kind:"message",message:message("name","what's your nickname?")};
+  assert.doesNotThrow(()=>validateStructuredOutput({action:"send",message:"i'm Fox",note:"I answered the name question"},"group",naming));
+  const renamed={...ctx,myNickname:"Otter"};
+  assert.throws(()=>validateStructuredOutput({action:"send",message:"Otter works at the library",note:"I answered"},"group",renamed),/third-person/);
+  assert.doesNotThrow(()=>validateStructuredOutput({action:"send",message:"Fox works at the library",note:"I answered"},"group",renamed));
+});
+test("a third-person draft regenerates into a first-person answer without rewriting facts",async()=>{
+  const ctx=fixture("accused-2");let calls=0;
+  const call:MuseCall=async<T>()=>({action:"send",message:++calls===1?"nah Fox works two afternoons at the library tbh":"i work two afternoons at the library",note:"I answered the work question"} as T);
+  const result=await generateTurn(ctx,call,new AbortController().signal,Date.now()+4000);
+  assert.equal(calls,2);assert.equal(result.text,"i work two afternoons at the library");assert.equal(result.regenerations,1);assert.equal(result.fallback,false);
+});
 test("cleanup preserves meaning, proper nouns, I, URLs and entire emoji clusters",()=>{
   const ctx=fixture("discuss-quiet"),style={...ctx.style,lowercaseStartRatio:0.9,endsWithPeriodRatio:0,emojiPerMessage:1};
   assert.equal(humanize("  The bus is late.  ",style,ctx.persona),"the bus is late");assert.equal(humanize("I went home.",style,ctx.persona),"I went home");
