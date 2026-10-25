@@ -7,6 +7,7 @@
     "start": "tsx src/index.ts",
     "bots": "tsx scripts/bots.ts",
     "ai:lab": "tsx scripts/ai-lab.ts",
+    "test": "tsx --test \"src/**/*.test.ts\"",
     "check:privacy": "tsx scripts/check-privacy.ts",
     "smoke": "tsx scripts/smoke.ts",
     "typecheck": "tsc --noEmit"
