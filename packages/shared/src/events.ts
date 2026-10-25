@@ -15,10 +15,13 @@ export type AckResult<T extends object = {}> = ({ ok: true } & T) | { ok: false;
 export type Ack<T extends object = {}> = (res: AckResult<T>) => void;
 
 export interface ClientToServerEvents {
-  /** Creates a room; the creator becomes host and joins as a player. */
-  "room:create": (p: { realName: string }, ack: Ack<{ code: RoomCode; playerId: PlayerId; token: string }>) => void;
-  /** Join only while phase === "lobby". */
-  "room:join": (p: { code: RoomCode; realName: string }, ack: Ack<{ playerId: PlayerId; token: string }>) => void;
+  /**
+   * Creates a room; the creator becomes host and joins as a player.
+   * `codename` (optional): a NICKNAMES entry the player picked; unused or omitted = random at start.
+   */
+  "room:create": (p: { realName: string; codename?: string }, ack: Ack<{ code: RoomCode; playerId: PlayerId; token: string }>) => void;
+  /** Join only while phase === "lobby". `codename` as for room:create; must be unique in the room. */
+  "room:join": (p: { code: RoomCode; realName: string; codename?: string }, ack: Ack<{ playerId: PlayerId; token: string }>) => void;
   /** Reconnect after refresh/sleep. Client keeps {code, token} in sessionStorage. */
   "room:rejoin": (p: { code: RoomCode; token: string }, ack: Ack<{ playerId: PlayerId }>) => void;
   /** Big-screen spectator. Receives RoomView with me === null and group chat only. */

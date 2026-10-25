@@ -1,9 +1,10 @@
 import { afterEach, describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { LIMITS, ROOM_TTL_MS, type PlayerId } from "@game/shared";
+import { LIMITS, NICKNAMES, ROOM_TTL_MS, type PlayerId } from "@game/shared";
 import { advance } from "./phases.js";
 import type { Room } from "./Room.js";
 import { RoomRegistry } from "./rooms.js";
+import { buildView } from "./view.js";
 import { flush, makeRoom, sleep, validMatch, TEST_PERSONA } from "./testkit.js";
 
 process.env.CHAT_DELAY_MS = "40";
@@ -523,5 +524,59 @@ describe("rooms registry", () => {
     assert.equal(b.seat(rb.playerId)!.connected, false, "seat kept but disconnected");
     assert.ok(b.seat(rb.playerId), "seat kept");
     registry.closeAll("test");
+  });
+});
+
+describe("codenames", () => {
+  test("a picked codename is kept; unknown or duplicate picks are rejected", async () => {
+    const { room, start } = setup({ humans: 3 });
+    assert.equal(room.addHuman("Ana", false, "NOT_A_CODENAME").ok, false);
+    const viper = room.addHuman("Ben", false, "NEON_VIPER");
+    assert.ok(viper.ok);
+    assert.deepEqual(room.addHuman("Cy", false, "NEON_VIPER"), {
+      ok: false,
+      error: "That codename is already in this room. Reroll your name and try again.",
+    });
+    await start();
+    assert.equal(room.seat(viper.playerId)!.nickname, "NEON_VIPER");
+    assert.equal(room.seat(viper.playerId)!.emoji, NICKNAMES.find((n) => n.nickname === "NEON_VIPER")!.emoji);
+  });
+
+  test("the AI and players without a pick get random unused codenames from the same list", async () => {
+    for (let run = 0; run < 20; run++) {
+      const { room, humans, start } = setup({ humans: 1 });
+      // Every remaining human picks; the AI must still get a different, valid codename.
+      const picks = ["CYBER_FOX", "ECHO_01", "GHOST_BYTE"];
+      for (const [i, c] of picks.entries()) assert.ok(room.addHuman(`P${i}`, false, c).ok);
+      await start();
+      const names = room.seats.map((s) => s.nickname!);
+      assert.equal(new Set(names).size, room.seats.length, "unique");
+      assert.ok(names.every((n) => NICKNAMES.some((x) => x.nickname === n)), "all from the shared list");
+      const ai = room.seat(room.aiId!)!;
+      assert.ok(!picks.includes(ai.nickname!), "AI never takes a picked codename");
+      assert.ok(room.seat(humans[0]!.id)!.nickname, "the non-picker got one too");
+      room.close("run over");
+    }
+  });
+
+  test("picked codenames never appear in any view before the game starts", () => {
+    const { room, humans } = setup({ humans: 3 });
+    const r = room.addHuman("Dee", false, "TURBO_OWL");
+    assert.ok(r.ok);
+    room.addSpectator("screen");
+    room.broadcast();
+    for (const viewer of [...humans.map((h) => h.id), r.playerId, null]) {
+      assert.ok(!JSON.stringify(buildView(room, viewer)).includes("TURBO_OWL"));
+    }
+  });
+
+  test("play again re-randomizes everyone's codename (no carry-over that would expose the AI)", async () => {
+    const t = setup({ humans: 3 });
+    const r = t.room.addHuman("Eve", false, "LASER_SHARK");
+    assert.ok(r.ok);
+    await t.start();
+    await t.advanceTo("partners");
+    assert.ok(t.room.playAgain(t.host.id).ok);
+    assert.ok(t.room.seats.every((s) => s.requestedCodename === undefined));
   });
 });

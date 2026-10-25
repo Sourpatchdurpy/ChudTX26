@@ -41,18 +41,28 @@ export const ROOM_TTL_MS = 30 * 60_000;
 export const ROOM_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ";
 export const ROOM_CODE_LENGTH = 4;
 
-/** Nicknames are shuffled and assigned to every player (AI included) when the game starts. */
+/**
+ * Arcade codenames. A player may pick one on the entry screen (room:create / room:join
+ * `codename`, rerollable); everyone else, and always the AI, gets a random unused one when
+ * the game starts, so the AI's codename looks like anyone's. Play again re-randomizes all
+ * of them (otherwise the one new codename in game 2 would be the AI).
+ * Needs at least LIMITS.maxHumans + 1 entries.
+ */
 export const NICKNAMES: readonly { nickname: string; emoji: string }[] = [
-  { nickname: "Fox", emoji: "🦊" },
-  { nickname: "Owl", emoji: "🦉" },
-  { nickname: "Otter", emoji: "🦦" },
-  { nickname: "Panda", emoji: "🐼" },
-  { nickname: "Koala", emoji: "🐨" },
-  { nickname: "Tiger", emoji: "🐯" },
-  { nickname: "Frog", emoji: "🐸" },
-  { nickname: "Penguin", emoji: "🐧" },
-  { nickname: "Octopus", emoji: "🐙" },
-  { nickname: "Bee", emoji: "🐝" },
-  { nickname: "Sloth", emoji: "🦥" },
-  { nickname: "Hedgehog", emoji: "🦔" },
+  { nickname: "CYBER_FOX", emoji: "🦊" },
+  { nickname: "NEON_VIPER", emoji: "🐍" },
+  { nickname: "ECHO_01", emoji: "📡" },
+  { nickname: "GHOST_BYTE", emoji: "👻" },
+  { nickname: "CIPHER_99", emoji: "🔐" },
+  { nickname: "PIXEL_PANDA", emoji: "🐼" },
+  { nickname: "TURBO_OWL", emoji: "🦉" },
+  { nickname: "LASER_SHARK", emoji: "🦈" },
+  { nickname: "NOVA_BEE", emoji: "🐝" },
+  { nickname: "GLITCH_FROG", emoji: "🐸" },
+  { nickname: "ROCKET_OTTER", emoji: "🦦" },
+  { nickname: "CHROME_TIGER", emoji: "🐯" },
+  { nickname: "STATIC_OCTO", emoji: "🐙" },
+  { nickname: "BYTE_BUNNY", emoji: "🐰" },
+  { nickname: "MEGA_SLOTH", emoji: "🦥" },
+  { nickname: "VOLT_KOALA", emoji: "🐨" },
 ];

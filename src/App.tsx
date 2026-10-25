@@ -33,18 +33,16 @@ export default function App() {
   if (!view || !view.me) {
     return <EntryScreen key={game.closedReason} {...theme} initialError={game.closedReason} onEnter={async (entry: EntryIdentity) => {
       game.dismissClosed();
-      if (entry.isHost) await game.create(entry.realName);
-      else await game.join(entry.roomCode, entry.realName);
+      if (entry.isHost) await game.create(entry.realName, entry.codename);
+      else await game.join(entry.roomCode, entry.realName, entry.codename);
     }} />;
   }
 
   const me = view.me;
-  const who = (id: PlayerId): Who => {
-    const p = view.players.find(player => player.id === id);
-    return { id, label: p ? `${p.emoji} ${p.nickname}` : '???' };
-  };
+  // Players appear as their plain arcade codename (e.g. NEON_VIPER), as in the original design.
+  const who = (id: PlayerId): Who => ({ id, label: view.players.find(player => player.id === id)?.nickname ?? '???' });
   const myLabel = who(me.id).label;
-  const idByLabel = (label: string) => view.players.find(p => `${p.emoji} ${p.nickname}` === label)?.id;
+  const idByLabel = (label: string) => view.players.find(p => p.nickname === label)?.id;
   const currentRecord = view.history[view.history.length - 1];
   const myPair = view.pairs?.find(pair => pair.members.includes(me.id)) ?? null;
   const partnerIds = myPair?.members.filter(id => id !== me.id) ?? [];

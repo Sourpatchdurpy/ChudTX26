@@ -101,13 +101,13 @@ export function useGame() {
   const actions = useMemo(() => {
     const s = getSocket();
     return {
-      async create(realName: string) {
-        const res = await call<{ code: string; playerId: PlayerId; token: string }>(ack => s.emit('room:create', { realName }, ack));
+      async create(realName: string, codename?: string) {
+        const res = await call<{ code: string; playerId: PlayerId; token: string }>(ack => s.emit('room:create', { realName, codename }, ack));
         saveSession({ code: res.code, token: res.token });
         setClosedReason('');
       },
-      async join(code: string, realName: string) {
-        const res = await call<{ playerId: PlayerId; token: string }>(ack => s.emit('room:join', { code, realName }, ack));
+      async join(code: string, realName: string, codename?: string) {
+        const res = await call<{ playerId: PlayerId; token: string }>(ack => s.emit('room:join', { code, realName, codename }, ack));
         saveSession({ code: code.toUpperCase(), token: res.token });
         setClosedReason('');
       },

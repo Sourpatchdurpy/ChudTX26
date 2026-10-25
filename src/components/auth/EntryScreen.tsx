@@ -1,9 +1,10 @@
 import { useRef, useState } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
-import { Moon, Sun } from 'lucide-react';
+import { Moon, RotateCw, Sun } from 'lucide-react';
 import PixelSky from '../shared/PixelSky';
 import ArcadeTitle from '../shared/ArcadeTitle';
 import type { EntryScreenProps } from '@/types/game';
+import { generateCodename } from '../../lib/entryIdentity';
 
 export type { EntryScreenProps } from '@/types/game';
 
@@ -23,6 +24,8 @@ function PixelFrame({ isDarkMode }: { isDarkMode: boolean }) {
 }
 
 export default function EntryScreen({ onEnter, isDarkMode, onToggleTheme, initialError }: EntryScreenProps) {
+  const [nickname, setNickname] = useState(() => generateCodename());
+  const [rerolls, setRerolls] = useState(0);
   const [realName, setRealName] = useState('');
   const [roomCode, setRoomCode] = useState('');
   const [isHost, setIsHost] = useState(false);
@@ -58,7 +61,7 @@ export default function EntryScreen({ onEnter, isDarkMode, onToggleTheme, initia
             submittingRef.current = true;
             setIsEntering(true);
             setEntryError('');
-            try { await onEnter({ realName: realName.trim(), roomCode, isHost }); }
+            try { await onEnter({ codename: nickname, realName: realName.trim(), roomCode, isHost }); }
             catch (error) { setEntryError(error instanceof Error ? error.message : 'Unable to enter this room. Please try again.'); }
             finally { submittingRef.current = false; setIsEntering(false); }
           }} className="flex min-w-0 w-full flex-col gap-4 sm:gap-5">
@@ -66,9 +69,16 @@ export default function EntryScreen({ onEnter, isDarkMode, onToggleTheme, initia
               {[{ label: 'JOIN ROOM', host: false }, { label: 'HOST ROOM', host: true }].map(mode => <button key={mode.label} type="button" aria-pressed={isHost === mode.host} disabled={isEntering} onClick={() => { setIsHost(mode.host); setEntryError(''); }} className={`min-h-11 flex-1 rounded-lg border px-1 py-3 text-[8px] leading-relaxed transition-colors sm:text-[10px] ${focusClass} ${isHost === mode.host ? (isDarkMode ? 'border-cyan-100 bg-[#00E5FF] text-[#060B28] shadow-[2px_2px_0_#001155]' : 'border-[#16223B]/80 bg-[#16223B] text-white shadow-[2px_2px_0_#16223B40]') : `${capsule} ${muted}`}`}>{mode.label}</button>)}
             </div>
             <div>
+              <p id="codename-label" className={`mb-2 text-[8px] leading-relaxed tracking-wider sm:text-[10px] ${muted}`}>SECRET CODENAME</p>
+              <div className={`flex items-center justify-between gap-2 rounded-xl border p-3 ${capsule}`}>
+                <p aria-labelledby="codename-label" aria-live="polite" aria-atomic="true" className={`min-w-0 break-words text-xs leading-loose sm:text-sm ${accent}`}>{nickname}</p>
+                <motion.button type="button" aria-label="Reroll codename" title="Reroll codename" disabled={isEntering} onClick={() => { setEntryError(''); setNickname(previous => generateCodename(previous)); setRerolls(value => value + 1); }} animate={{ rotate: reduceMotion ? 0 : rerolls * 180 }} transition={{ type: 'spring', stiffness: 260, damping: 22 }} className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-lg hover:bg-white/15 ${accent} ${focusClass}`}><RotateCw size={18} aria-hidden="true" /></motion.button>
+              </div>
+            </div>
+            <div>
               <label htmlFor="entry-real-name" className={`mb-2 block text-[8px] leading-relaxed tracking-wider sm:text-[10px] ${muted}`}>YOUR FIRST NAME</label>
               <input id="entry-real-name" type="text" required autoComplete="given-name" maxLength={20} disabled={isEntering} value={realName} onChange={event => { setEntryError(''); setRealName(event.target.value.slice(0, 20)); }} placeholder="Maya" className={`w-full rounded-xl border px-3 py-3 font-sans text-base focus:outline-2 focus:outline-offset-4 ${capsule} ${isDarkMode ? 'text-white placeholder:text-[#7D9CBD] focus:outline-white' : 'text-[#0E1726] placeholder:text-[#526078] focus:outline-[#0E1726]'}`} />
-              <p className={`mt-2 font-sans text-xs ${muted}`}>Secret until the reveal. In the game you get a random codename.</p>
+              <p className={`mt-2 font-sans text-xs ${muted}`}>Stays secret until the reveal. Everyone plays under their codename.</p>
             </div>
             <motion.div key={isHost ? 'host' : 'join'} initial={{ opacity: reduceMotion ? 1 : 0 }} animate={{ opacity: 1 }} transition={{ duration: reduceMotion ? 0 : 0.15 }}>
               {isHost ? <>

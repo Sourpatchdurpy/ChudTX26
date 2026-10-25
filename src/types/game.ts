@@ -1,4 +1,6 @@
 export interface EntryIdentity {
+  /** Rerollable arcade codename (from the shared NICKNAMES list): the name you play under. */
+  codename: string;
   /** Real first name: only revealed to the group at the end of the game. */
   realName: string;
   /** Join only; hosts get a code from the server. */

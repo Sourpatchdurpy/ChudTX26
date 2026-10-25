@@ -43,6 +43,8 @@ export interface Seat {
   isHost: boolean;
   nickname?: string;
   emoji?: string;
+  /** Codename picked on the entry screen (a NICKNAMES entry). Honored at start; cleared on play again. */
+  requestedCodename?: string;
   socketIds: Set<string>;
   connected: boolean;
 }
@@ -153,18 +155,24 @@ export class Room {
 
   // ── lobby / connections ────────────────────────────────────────────────────
 
-  addHuman(rawName: string, isHost: boolean): Ok<{ playerId: PlayerId; token: string }> {
+  addHuman(rawName: string, isHost: boolean, codename?: string): Ok<{ playerId: PlayerId; token: string }> {
     const realName = rawName.trim();
     if (realName.length < 1) return fail("Enter your first name.");
     if (realName.length > LIMITS.realNameMaxChars) return fail(`Name must be at most ${LIMITS.realNameMaxChars} characters.`);
     if (this.phase !== "lobby" || this.busy) return fail("This game has already started.");
     if (this.humans().length >= LIMITS.maxHumans) return fail("This room is full.");
+    // Only names from the shared list, so a human's codename never looks different from the AI's.
+    if (codename !== undefined && !NICKNAMES.some((n) => n.nickname === codename)) return fail("Unknown codename. Reroll and try again.");
+    if (codename !== undefined && this.seats.some((s) => s.requestedCodename === codename)) {
+      return fail("That codename is already in this room. Reroll your name and try again.");
+    }
     const seat: Seat = {
       id: nanoid(10),
       token: nanoid(21),
       realName,
       isAi: false,
       isHost,
+      requestedCodename: codename,
       socketIds: new Set(),
       connected: false,
     };
@@ -254,11 +262,14 @@ export class Room {
     };
     this.seats.push(aiSeat);
     this.aiId = aiSeat.id;
-    const names = shuffle(NICKNAMES);
-    this.seats.forEach((s, i) => {
-      s.nickname = names[i]!.nickname;
-      s.emoji = names[i]!.emoji;
-    });
+    // Picked codenames are kept; everyone else (always including the AI) gets a random unused one.
+    const picked = new Set(this.seats.map((s) => s.requestedCodename).filter(Boolean));
+    const pool = shuffle(NICKNAMES.filter((n) => !picked.has(n.nickname)));
+    for (const s of this.seats) {
+      const name = NICKNAMES.find((n) => n.nickname === s.requestedCodename) ?? pool.pop()!;
+      s.nickname = name.nickname;
+      s.emoji = name.emoji;
+    }
     this.seats = shuffle(this.seats);
     this.sessionGeneration = nanoid(12);
     this.firstQuestionRevision = -1;
@@ -398,6 +409,8 @@ export class Room {
     for (const s of this.seats) {
       delete s.nickname;
       delete s.emoji;
+      // Re-randomize everyone: if humans kept their codenames, game 2's one new codename would be the AI.
+      delete s.requestedCodename;
     }
     this.preparePersona();
     enterPhase(this, "lobby");

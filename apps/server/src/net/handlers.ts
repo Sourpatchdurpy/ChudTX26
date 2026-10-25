@@ -14,8 +14,8 @@ const code = z.string().max(16);
 const text = z.string().max(2_000);
 const id = z.string().max(64);
 const S = {
-  create: z.object({ realName: text }),
-  join: z.object({ code, realName: text }),
+  create: z.object({ realName: text, codename: z.string().max(32).optional() }),
+  join: z.object({ code, realName: text, codename: z.string().max(32).optional() }),
   rejoin: z.object({ code, token: z.string().max(64) }),
   watch: z.object({ code }),
   answer: z.object({ text }),
@@ -67,7 +67,7 @@ export function registerHandlers(io: GameServer, registry: RoomRegistry, log: (l
         const parsed = S.create.safeParse(p);
         if (!parsed.success) return reply(BAD_REQUEST);
         const room = registry.create();
-        const res = room.addHuman(parsed.data.realName, true);
+        const res = room.addHuman(parsed.data.realName, true, parsed.data.codename);
         if (!res.ok) {
           registry.delete(room, "creation failed");
           return reply(res);
@@ -84,7 +84,7 @@ export function registerHandlers(io: GameServer, registry: RoomRegistry, log: (l
         if (!parsed.success) return reply(BAD_REQUEST);
         const room = registry.get(parsed.data.code);
         if (!room) return reply(NO_ROOM);
-        const res = room.addHuman(parsed.data.realName, false);
+        const res = room.addHuman(parsed.data.realName, false, parsed.data.codename);
         if (!res.ok) return reply(res);
         registry.bind(socket.id, room, res.playerId);
         reply({ ok: true, playerId: res.playerId, token: res.token });
