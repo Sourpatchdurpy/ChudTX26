@@ -4,8 +4,7 @@ import { LIMITS, ROOM_TTL_MS, type PlayerId } from "@game/shared";
 import { advance } from "./phases.js";
 import type { Room } from "./Room.js";
 import { RoomRegistry } from "./rooms.js";
-import { STUB_PERSONA } from "./stubAi.js";
-import { flush, makeRoom, sleep, validMatch } from "./testkit.js";
+import { flush, makeRoom, sleep, validMatch, TEST_PERSONA } from "./testkit.js";
 
 process.env.CHAT_DELAY_MS = "40";
 delete process.env.TIMER_SCALE;
@@ -47,7 +46,7 @@ describe("lobby", () => {
 
   test("no joining after start, and none while start is in progress", async () => {
     let release!: () => void;
-    const { room, host } = setup({ humans: 3, persona: () => new Promise((r) => (release = () => r(STUB_PERSONA))) });
+    const { room, host } = setup({ humans: 3, persona: () => new Promise((r) => (release = () => r(TEST_PERSONA))) });
     const starting = room.start(host.id);
     await flush();
     assert.equal(room.addHuman("Sneaky", false).ok, false, "join during start");
@@ -72,12 +71,21 @@ describe("lobby", () => {
     assert.equal(fake.lastView?.me?.id, room.aiId);
   });
 
-  test("a rejected persona falls back to STUB_PERSONA", async () => {
+  test("a rejected persona uses the current complete fallback supplier", async () => {
     const { room, fake, start } = setup({ humans: 3, persona: () => Promise.reject(new Error("muse down")) });
     await start();
-    assert.deepEqual(fake.init?.persona, STUB_PERSONA);
+    assert.deepEqual(fake.init?.persona, TEST_PERSONA);
     assert.equal(room.seat(room.aiId!)!.realName, "", "personas have no name; the AI is known by its nickname");
     assert.ok(fake.init?.sessionGeneration);
+  });
+
+  test("legacy persona fields are rejected at game start and replaced with a complete current persona", async () => {
+    const { fake, start } = setup({ humans: 3, persona: async () => ({ ...TEST_PERSONA, style: { casing: "lowercase" } }) });
+    await start();
+    assert.deepEqual(fake.init?.persona, TEST_PERSONA);
+    assert.equal("style" in fake.init!.persona, false);
+    assert.equal("name" in fake.init!.persona, false);
+    assert.ok(fake.init!.persona.facts.length >= 8);
   });
 
   test("round 1 sends the AI a private snapshot of human answers, never in any view", async () => {
@@ -281,7 +289,7 @@ describe("round 3, reveal, partners", () => {
     assert.deepEqual(Object.keys(rv.realNames).sort(), humans.map((h) => h.id).sort());
     assert.deepEqual(rv.vouchedForAi, [leftover]);
     assert.ok(rv.suspectedBy.every((s) => s.rounds.includes(3)));
-    assert.equal(rv.aiPersona.name, "Jordan");
+    assert.equal(rv.aiPersona.name, room.seat(aiId)!.nickname);
 
     await t.advanceTo("partners");
     const card = room.partnerCards.get(leftover)!;
@@ -442,7 +450,7 @@ describe("host controls", () => {
       humans: 3,
       persona: async () => {
         personaCalls++;
-        return STUB_PERSONA;
+        return TEST_PERSONA;
       },
     });
     const { room, host, humans, fake } = t;

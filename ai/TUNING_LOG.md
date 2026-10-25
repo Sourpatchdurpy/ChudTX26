@@ -1,5 +1,12 @@
 # Development tuning log
 
+## Merged-server persona migration
+
+- Migrated server preparation/readiness, stub mode and test fixtures to the current complete persona contract. All server integration boundaries use the root `validatePersona`; generated names, style sections and incomplete sheets are rejected. Removed the legacy stub/last-resort persona constants and use the root fallback pool, including fresh preparation for each stub game.
+- The merged controller now delegates to root structured-output validation and inferred writing style, preserving current first-person checks, mode limits and history-derived casing/punctuation. The old player entry point re-exports the root implementation.
+- Updated reveal tests and privacy verification to use the actual game nickname and selected persona blurb. Root typecheck, 200 mocked server tests, 71 mocked AI tests and the stub privacy check pass (790 views across 10 phases). No live API calls were made.
+- Per the user's scope change, reverted the newly created `apps/web` workspace, its dependency additions and lockfile changes. Only the persona migration is retained.
+
 ## Infer writing style from game history
 
 - Removed the entire `Persona.style` section from the shared contract, generation schema/instructions, fallback personas, serialized persona prompts and readiness freezing. Returned style sections are rejected.

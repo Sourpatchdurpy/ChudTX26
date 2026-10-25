@@ -67,13 +67,6 @@ type GenResult =
 
 type FallbackKind = "light" | "personal" | "collab" | "group" | "accused" | "pair";
 
-const MODE_LIMITS: Record<AiMode, number> = {
-  answer: LIMITS.answerMaxChars,
-  group: LIMITS.chatMaxChars,
-  pair: LIMITS.chatMaxChars,
-  collab: LIMITS.collabMaxChars,
-};
-
 /** Don't start a Muse call with less time than this to wait for it. */
 const MIN_CALL_MS = 1_500;
 /** Chat turns keep this much of the phase free for typing time and the 4s rule. */
@@ -93,22 +86,6 @@ function museTimeoutMs(): number {
 
 function errorName(err: unknown): string {
   return err instanceof Error ? err.name : typeof err;
-}
-
-/** Sanity-check Part 2's structured output (museCall is a cast, not a validation). */
-function parseOutput(mode: AiMode, raw: unknown): { skip: true } | { skip: false; text: string; note: string } | null {
-  if (!raw || typeof raw !== "object") return null;
-  const o = raw as Record<string, unknown>;
-  const note = typeof o.note === "string" ? o.note : "";
-  switch (mode) {
-    case "answer":
-      return typeof o.answer === "string" ? { skip: false, text: o.answer, note } : null;
-    case "collab":
-      return typeof o.result === "string" ? { skip: false, text: o.result, note } : null;
-    default:
-      if (o.action === "skip") return { skip: true };
-      return o.action === "send" && typeof o.message === "string" ? { skip: false, text: o.message, note } : null;
-  }
 }
 
 export class AiController implements AiPlayer {
@@ -664,21 +641,13 @@ export class AiController implements AiPlayer {
           label: mode, timeoutMs, deadlineAtMs, signal: p.ac.signal, roomCode: this.roomCode,
         });
         if (!this.isCurrent(key)) return { kind: "failed", reason: "phase over" };
-        const out = parseOutput(mode, raw);
-        if (!out) {
-          reason = "malformed output";
-          continue;
+        try {
+          const out = this.h.validateStructuredOutput(raw, mode, ctx);
+          if (out.action === "skip") return { kind: "skip" };
+          return { kind: "text", text: out.text, note: out.note };
+        } catch (err) {
+          reason = err instanceof Error ? err.message : "invalid structured output";
         }
-        if (out.skip) {
-          if (!addressed) return { kind: "skip" };
-          // Someone talked to the AI directly: skipping isn't allowed (PART_2_DESIGN §2.7.2).
-          reason = "skipped a turn addressed to it";
-          continue;
-        }
-        const text = truncateAtWord(oneLine(this.h.humanize(out.text, ctx.style, this.persona)), MODE_LIMITS[mode]);
-        const verdict = text ? this.h.validateOutput(text) : ({ ok: false, reason: "empty" } as const);
-        if (verdict.ok) return { kind: "text", text, note: out.note };
-        reason = `invalid: ${verdict.reason}`;
       } catch (err) {
         // museCall already retried transient errors once; don't pay for another attempt.
         return { kind: "failed", reason: errorName(err) };
@@ -701,7 +670,7 @@ export class AiController implements AiPlayer {
     const view = this.view!;
     const answers = view.history.flatMap((r) => r.answers);
     const firstQuestion = mode === "answer" && this.phase?.round === 1;
-    return {
+    const ctx: PlayerTurnContext = {
       // Part 2's extensions (PART_2_DESIGN §2.3): memory, the round-1 snapshot and the cutoff.
       memory: this.memory ?? undefined,
       firstQuestionHumanAnswers: firstQuestion ? (this.firstSnapshot ?? undefined) : undefined,
@@ -719,6 +688,7 @@ export class AiController implements AiPlayer {
       saidSoFar: [...this.saidSoFar],
       secondsLeftInPhase: Math.max(0, Math.round(Math.min(this.msLeft(), 3_600_000) / 1000)),
     };
+    return { ...ctx, style: this.h.inferWritingStyle(ctx).style };
   }
 
   // ── Fallbacks and notes ───────────────────────────────────────────────────

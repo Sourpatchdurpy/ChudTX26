@@ -2,6 +2,7 @@
 // Part 2's ai/player/ or Muse. Always resolves with a usable Persona. Logs timing only.
 import type { MuseCall, Persona, PrepareAiPersona, RoomCode, WorldContext } from "@game/shared";
 import { AbortedError, withTimeout } from "../util.js";
+import { fallbackPersona, validatePersona } from "@game/ai";
 
 const WORLD_TIMEOUT_MS = 26_000; // getWorldContext has its own ~25s timeout; this is a backstop
 const DEFAULT_PERSONA_TIMEOUT_MS = 15_000;
@@ -13,21 +14,6 @@ export interface PersonaDeps {
   callFor: (roomCode: RoomCode, signal?: AbortSignal) => MuseCall;
   timeoutMs?: number; // generatePersona timeout, default 15_000
 }
-
-/** Used only if even Part 2's fallbackPersona() throws or returns junk. */
-const LAST_RESORT_PERSONA: Persona = {
-  age: 20,
-  school: "UT Austin",
-  year: "junior",
-  major: "electrical and computer engineering",
-  hometown: "San Antonio",
-  interests: ["Smash Bros", "bouldering", "lo-fi playlists"],
-  opinions: ["breakfast tacos are a personality trait", "8am classes should be illegal"],
-  facts: ["lives in West Campus", "has a roommate who never leaves the PCL"],
-  thisWeek: ["went down the bouncy house slide in the GDC courtyard", "watched some of the Smash tournament"],
-  style: { casing: "lowercase", emojiRate: 0.2, slang: ["lol", "ngl", "fr"], punctuation: "minimal" },
-  blurb: "junior ECE student from San Antonio",
-};
 
 export function makePrepareAiPersona(deps: PersonaDeps): PrepareAiPersona {
   const timeoutMs = deps.timeoutMs ?? DEFAULT_PERSONA_TIMEOUT_MS;
@@ -68,34 +54,12 @@ function safeFallback(deps: PersonaDeps): { persona: Persona; lastResort: boolea
   } catch {
     // fall through
   }
-  return { persona: structuredClone(LAST_RESORT_PERSONA), lastResort: true };
+  return { persona: fallbackPersona(), lastResort: true };
 }
 
 /**
- * Null if the persona is unusable (no blurb or style; personas have no name). Otherwise a copy
- * with every array field forced to a string array, so prompt builders never crash.
+ * Use the current Part 2 contract: no names, style sections or partial sheets.
  */
 function normalizePersona(raw: unknown): Persona | null {
-  if (!isRecord(raw) || !nonEmpty(raw.blurb) || !isRecord(raw.style)) return null;
-  const p = raw as unknown as Persona;
-  return {
-    ...p,
-    interests: strings(raw.interests),
-    opinions: strings(raw.opinions),
-    facts: strings(raw.facts),
-    thisWeek: strings(raw.thisWeek),
-    style: { ...p.style, slang: strings(raw.style.slang) },
-  };
-}
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
-}
-
-function nonEmpty(v: unknown): v is string {
-  return typeof v === "string" && v.trim().length > 0;
-}
-
-function strings(v: unknown): string[] {
-  return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  try { return validatePersona(raw); } catch { return null; }
 }

@@ -32,7 +32,7 @@ import { ALL_ANSWERED_GRACE_MS, ALL_VOTED_GRACE_MS, chatDelayMs, PERSONA_WAIT_MS
 import type { ContentStore } from "./content.js";
 import { advance, beginRound, enterPhase } from "./phases.js";
 import { shuffle, withTimeout } from "./random.js";
-import { STUB_PERSONA } from "./stubAi.js";
+import { fallbackPersona as emergencyFallbackPersona, validatePersona } from "@game/ai";
 import { buildView } from "./view.js";
 
 export interface Seat {
@@ -223,7 +223,7 @@ export class Room {
     this.busy = true;
     let persona: Persona | null = null;
     try {
-      if (this.personaPromise) persona = await withTimeout(this.personaPromise, PERSONA_WAIT_MS, "persona");
+      if (this.personaPromise) persona = validatePersona(await withTimeout(this.personaPromise, PERSONA_WAIT_MS, "persona"));
     } catch (e) {
       this.log(`persona not ready, using the fallback persona (${errMsg(e)})`);
     } finally {
@@ -235,10 +235,10 @@ export class Room {
       // Readiness deadline: freeze the fallback and stop preparing; a late result is ignored.
       this.personaAbort?.abort();
       try {
-        persona = this.deps.ai.fallbackPersona?.() ?? STUB_PERSONA;
+        persona = validatePersona(this.deps.ai.fallbackPersona?.() ?? emergencyFallbackPersona());
       } catch (e) {
-        this.log(`fallbackPersona threw, using STUB_PERSONA: ${errMsg(e)}`);
-        persona = STUB_PERSONA;
+        this.log(`fallbackPersona failed validation, using the complete fallback pool: ${errMsg(e)}`);
+        persona = emergencyFallbackPersona();
       }
     }
 

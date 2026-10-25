@@ -1,2 +1,2 @@
-// Placeholder. Part 2 replaces this file with the persona/prompt/humanizer exports.
-export {};
+// Existing entry point retained for imports; the current implementation lives at root ai/.
+export * from "@game/ai";

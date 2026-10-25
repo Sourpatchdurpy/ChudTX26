@@ -2,6 +2,7 @@
 // No real Muse calls are possible here: the controller only calls deps.call.
 import { afterEach, beforeEach, describe, mock, test } from "node:test";
 import assert from "node:assert/strict";
+import { createSessionMemory, fallbackPersona, inferWritingStyle, validateStructuredOutput } from "@game/ai";
 import { CHAT_DELAY_MS, LIMITS } from "@game/shared";
 import type {
   AiActions, Channel, ChatMessage, CurrentRound, FirstQuestionAnswerSnapshot, MuseChatRequest, Persona, Phase,
@@ -26,12 +27,7 @@ const PLAYERS = [
 
 const SESSION = "gen-1";
 
-const PERSONA: Persona = {
-  age: 20, school: "UT Austin", year: "sophomore", major: "CS", hometown: "Houston",
-  interests: [], opinions: [], facts: [], thisWeek: [],
-  style: { casing: "lowercase", emojiRate: 0.2, slang: [], punctuation: "minimal" },
-  blurb: "sophomore CS student from Houston",
-};
+const PERSONA: Persona = fallbackPersona();
 
 const FALLBACKS: HumannessDeps["FALLBACK_LINES"] = {
   answer: { light: ["tacos no question"], personal: ["boba with my roommate"] },
@@ -55,8 +51,8 @@ function fakeHumanness(overrides: Partial<HumannessDeps> = {}, built: PlayerTurn
       medianChars: 40, lowercaseStartRatio: 0.7, endsWithPeriodRatio: 0.1,
       emojiPerMessage: 0.2, commonTokens: [], sampleMessages: [],
     }),
-    humanize: (t) => t.trim(),
-    validateOutput: (t) => (/as an ai/i.test(t) ? { ok: false, reason: "tell" } : { ok: true }),
+    inferWritingStyle,
+    validateStructuredOutput,
     FALLBACK_LINES: FALLBACKS,
     ...overrides,
   };
@@ -563,7 +559,7 @@ describe("AiController", () => {
 
   test("Part 2 memory: created per game, kept in sync, passed to builders, records accepted output, disposed", async () => {
     const log: string[] = [];
-    const memory = { tag: "memory" } as unknown as SessionMemory;
+    const memory = createSessionMemory(SESSION, PLAYERS);
     const built: PlayerTurnContext[] = [];
     const humanness = fakeHumanness(
       {

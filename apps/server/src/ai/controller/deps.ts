@@ -12,8 +12,8 @@ type Builders = Pick<
   | "buildPairChatRequest"
   | "buildCollabRequest"
   | "computeStyleProfile"
-  | "humanize"
-  | "validateOutput"
+  | "validateStructuredOutput"
+  | "inferWritingStyle"
   | "FALLBACK_LINES"
 >;
 

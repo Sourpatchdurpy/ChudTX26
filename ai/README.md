@@ -12,7 +12,7 @@ npm.cmd run ai:lab -- --fixture accused-1
 npm.cmd run ai:lab -- --fixture r1-answer-light --mode answer
 ```
 
-On Windows, `npm.cmd` avoids PowerShell execution-policy restrictions on `npm.ps1`. Node 22 or newer is sufficient for this workspace; the eventual server plan targets Node 24. Tests cover the actual root exports and shared contracts. `@game/server` is still absent, so no server workspace typecheck or complete-game test has run.
+On Windows, `npm.cmd` avoids PowerShell execution-policy restrictions on `npm.ps1`. Node 22 or newer is sufficient for this workspace; the server plan targets Node 24. The merged `@game/server` workspace now consumes the current root persona contract, validator, fallback pool, inferred writing style and structured-output validation. Root typecheck, mocked server/AI tests and the stub-game privacy check run locally. The frontend remains absent; this persona migration does not add `apps/web`.
 
 The two editable gameplay templates are `prompts/question-answer.ts` and `prompts/conversation-interrogation.ts`. Both share the prefix in `prompts.ts`. Persona generation is a separate lobby operation. Normal turns make one generation invocation; invalid structured output permits one regeneration. Each invocation permits at most two provider attempts. All attempts and backoff share the caller's cancellation signal and absolute cutoff.
 
@@ -25,6 +25,8 @@ Self-references use first person (`I/me/my`, or `we/us/our` for shared agreement
 Every request identifies its current `activeTask`. Answer mode targets the round question. Group/pair chat targets an attributed player message or joins the conversation; a group round question is labeled `roundBackground` with status `already-answered`. Collaboration mode targets the card's result submission. Conversation `round` metadata does not contain an unlabeled question to answer. Group fixtures use scenario-specific round context, and pair messages come only from actual pair members.
 
 ## Server handoff
+
+The merged server retains Part 4's controller under `apps/server/src/ai/controller/`. It delegates persona validation and output validation to the exports in this workspace, including `validatePersona`, `inferWritingStyle` and `validateStructuredOutput`. The standalone helpers below also remain available; they do not replace that server controller's action scheduling. Server readiness and stub preparation now use the complete current fallback pool, with no separate legacy persona sheet.
 
 The real server must wire these exported helpers into its accepted-state mutation path:
 

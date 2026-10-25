@@ -14,7 +14,10 @@ import type {
 import { loadContent } from "./content.js";
 import { advance } from "./phases.js";
 import { Room, type AiImpl } from "./Room.js";
-import { runMatchmaker as stubMatchmaker, STUB_PERSONA } from "./stubAi.js";
+import { runMatchmaker as stubMatchmaker } from "./stubAi.js";
+import { fallbackPersona } from "@game/ai";
+
+export const TEST_PERSONA: Persona = fallbackPersona();
 
 export const flush = () => new Promise<void>((r) => setImmediate(r));
 export const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -43,7 +46,8 @@ export function makeRoom(opts: TestRoomOptions = {}) {
   const fake: FakeAi = { events: [], lastView: null, actions: null, disposed: false, init: null };
 
   const ai: AiImpl = {
-    prepareAiPersona: opts.persona ?? (async () => STUB_PERSONA),
+    prepareAiPersona: opts.persona ?? (async () => structuredClone(TEST_PERSONA)),
+    fallbackPersona: () => structuredClone(TEST_PERSONA),
     runMatchmaker: opts.matchmaker ?? stubMatchmaker,
     createAiPlayer: (init) => {
       if (opts.createThrows) throw new Error("boom: createAiPlayer");
@@ -55,7 +59,7 @@ export function makeRoom(opts: TestRoomOptions = {}) {
           fake.events.push(event);
           fake.lastView = view;
         },
-        getRevealInfo: () => ({ persona: { name: "Jordan", blurb: "test blurb" }, notes: [{ round: 1, text: "note" }] }),
+        getRevealInfo: () => ({ persona: { name: fake.lastView?.me?.nickname ?? "", blurb: TEST_PERSONA.blurb }, notes: [{ round: 1, text: "note" }] }),
         dispose() {
           fake.disposed = true;
         },

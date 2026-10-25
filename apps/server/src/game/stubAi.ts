@@ -1,6 +1,6 @@
 // Canned AI for AI_MODE=stub. Exports the same three names as src/ai/index.ts
-// so the two modules are interchangeable, plus STUB_PERSONA (also the fallback
-// when the real persona isn't ready at game start). Never calls Muse.
+// so the two modules are interchangeable. Uses Part 2's complete fallback pool.
+// Never calls Muse.
 import type {
   AiNoteView,
   CreateAiPlayer,
@@ -12,24 +12,11 @@ import type {
   RunMatchmaker,
 } from "@game/shared";
 import { randomPairing } from "./pairing.js";
+import { fallbackPersona as selectFallbackPersona } from "@game/ai";
 import { clamp, pick, rand } from "./random.js";
 
-export const STUB_PERSONA: Persona = {
-  age: 20,
-  school: "UT Austin",
-  year: "sophomore",
-  major: "computer science",
-  hometown: "Houston",
-  interests: ["bouldering", "indie games", "making way too much cold brew"],
-  opinions: ["breakfast tacos are the best breakfast, not up for debate", "group projects should be illegal"],
-  facts: ["has a cat named Pixel back home", "works the front desk at PCL"],
-  thisWeek: ["got lost in GDC looking for a bathroom", "had Round Rock Donuts for dinner"],
-  style: { casing: "lowercase", emojiRate: 0.2, slang: ["ngl", "lowkey", "fr"], punctuation: "minimal" },
-  blurb: "sophomore CS student from Houston",
-};
-
 /** Synchronous readiness-fallback supplier (same name as src/ai/index.ts). */
-export const fallbackPersona = (): Persona => structuredClone(STUB_PERSONA);
+export const fallbackPersona = (): Persona => selectFallbackPersona();
 
 const ANSWERS: Record<string, string[]> = {
   light: [
@@ -48,7 +35,7 @@ const PAIR_LINES = ["hii ok what do we have in common", "lol ok same actually", 
 const COLLAB_LINES = ["we both have way too many tabs open at all times", "we both lowkey hate group projects"];
 
 export const prepareAiPersona: PrepareAiPersona = () =>
-  new Promise((resolve) => setTimeout(() => resolve(STUB_PERSONA), 1_000));
+  new Promise((resolve) => setTimeout(() => resolve(selectFallbackPersona()), 1_000));
 
 export const createAiPlayer: CreateAiPlayer = ({ aiPlayerId, persona, actions }) => {
   const timers = new Set<ReturnType<typeof setTimeout>>();

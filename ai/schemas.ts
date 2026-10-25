@@ -43,3 +43,10 @@ export function normalizePersona(value:unknown):Persona {
   for(const values of [p.interests,p.opinions,p.facts,p.thisWeek])if(new Set(values.map(s=>s.trim().toLowerCase())).size!==values.length)throw new Error("duplicate persona details");
   return p;
 }
+
+/** Validate an already-normalized persona at server integration boundaries. */
+export function validatePersona(value:unknown):Persona {
+  if(!value||typeof value!=="object"||Array.isArray(value))throw new Error("invalid persona object");
+  const p=value as Record<string,unknown>;
+  return normalizePersona({...p,school:p.school??null,year:p.year??null,major:p.major??null});
+}

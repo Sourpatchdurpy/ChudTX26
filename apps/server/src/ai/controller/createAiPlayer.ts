@@ -9,10 +9,10 @@ import {
   computeStyleProfile,
   createSessionMemory,
   disposeSessionMemory,
-  humanize,
+  inferWritingStyle,
   recordAcceptedOutput,
   updateSessionMemory,
-  validateOutput,
+  validateStructuredOutput,
 } from "@game/ai";
 import type { CreateAiPlayer } from "@game/shared";
 import { logRoomMuseStats, museCall } from "../muse.js";
@@ -26,8 +26,8 @@ export const createAiPlayer: CreateAiPlayer = (init) =>
       buildPairChatRequest,
       buildCollabRequest,
       computeStyleProfile,
-      humanize,
-      validateOutput,
+      inferWritingStyle,
+      validateStructuredOutput,
       FALLBACK_LINES,
       createSessionMemory,
       updateSessionMemory,

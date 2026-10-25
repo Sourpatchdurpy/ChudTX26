@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, mock, test } from "node:test";
 import type { MuseCall, Persona, WorldContext } from "@game/shared";
+import { fallbackPersona } from "@game/ai";
 import { setMuseCallForTests, setMuseResponsesForTests } from "../muse.js";
 import { HACKTX_FACTS } from "./hacktx-facts.js";
 import { makePrepareAiPersona, type PersonaDeps } from "./persona.js";
@@ -328,16 +329,12 @@ const WORLD: WorldContext = {
 };
 
 const GENERATED: Persona = {
+  ...fallbackPersona(),
   age: 19,
   school: "UT Austin",
   year: "sophomore",
   major: "computer science",
   hometown: "Plano",
-  interests: ["chess"],
-  opinions: ["tacodeli > everything"],
-  facts: ["lives in Jester"],
-  thisWeek: ["did the bouncy house"],
-  style: { casing: "lowercase", emojiRate: 0.1, slang: ["lol"], punctuation: "minimal" },
   blurb: "sophomore CS student from Plano",
 };
 
@@ -391,6 +388,19 @@ describe("makePrepareAiPersona", () => {
     assert.ok(!logs[0]!.includes(GENERATED.blurb));
   });
 
+  test("a complete nonstudent persona needs neither education nor a style section", async () => {
+    const nonstudent = fallbackPersona();
+    delete nonstudent.school;
+    delete nonstudent.year;
+    delete nonstudent.major;
+    const { d, counts } = deps({ generatePersona: async () => nonstudent });
+    const p = await makePrepareAiPersona(d)({ roomCode: "ABCD" });
+    assert.deepEqual(p, nonstudent);
+    assert.equal(counts.fallback, 0);
+    assert.equal("style" in p, false);
+    assert.equal("name" in p, false);
+  });
+
   test("generatePersona rejects → fallback", async () => {
     const { d, counts } = deps({ generatePersona: async () => Promise.reject(new SyntaxError("bad json")) });
     const p = await makePrepareAiPersona(d)({ roomCode: "ABCD" });
@@ -436,11 +446,12 @@ describe("makePrepareAiPersona", () => {
     assert.equal(callForArgs[0]!.signal?.aborted, true);
   });
 
-  test("unusable persona (empty or missing blurb, no style) → fallback", async () => {
+  test("unusable or legacy persona → fallback", async () => {
     for (const bad of [
       { ...GENERATED, blurb: "  " },
       { ...GENERATED, blurb: undefined },
-      { ...GENERATED, style: null },
+      { ...GENERATED, style: { casing: "lowercase" } },
+      { ...GENERATED, name: "Legacy name" },
       null,
       "Jordan",
     ]) {
@@ -451,24 +462,20 @@ describe("makePrepareAiPersona", () => {
     assert.ok(logs.every((l) => l.endsWith("(fallback: unusable)")));
   });
 
-  test("missing or junk arrays are normalized to string arrays", async () => {
+  test("missing or junk arrays use a complete fallback instead of a partial persona", async () => {
     const partial = {
       ...GENERATED,
       interests: undefined,
       opinions: "hot take",
       facts: ["ok", 3, null],
       thisWeek: null,
-      style: { casing: "mixed", emojiRate: 0, punctuation: "normal" },
     };
     const { d } = deps({ generatePersona: async () => partial as unknown as Persona });
     const p = await makePrepareAiPersona(d)({ roomCode: "ABCD" });
-    assert.equal(p.blurb, GENERATED.blurb);
-    assert.deepEqual(p.interests, []);
-    assert.deepEqual(p.opinions, []);
-    assert.deepEqual(p.facts, ["ok"]);
-    assert.deepEqual(p.thisWeek, []);
-    assert.deepEqual(p.style.slang, []);
-    assert.equal(p.style.casing, "mixed");
+    assert.equal(p.blurb, FALLBACK.blurb);
+    assert.ok(p.interests.length >= 2);
+    assert.ok(p.facts.length >= 8);
+    assert.equal("style" in p, false);
   });
 
   test("getWorldContext rejecting → fallback", async () => {
@@ -487,7 +494,9 @@ describe("makePrepareAiPersona", () => {
     });
     const p = await makePrepareAiPersona(d)({ roomCode: "ABCD" });
     assert.ok(p.blurb.length > 0);
-    assert.ok(Array.isArray(p.interests) && Array.isArray(p.style.slang));
+    assert.ok(p.interests.length >= 2 && p.facts.length >= 8);
+    assert.equal("name" in p, false);
+    assert.equal("style" in p, false);
     assert.match(logs[0]!, /\(fallback: Error, last resort\)$/);
   });
 });
