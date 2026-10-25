@@ -105,9 +105,12 @@ function PrivateAnswerRound({
 
         <form onSubmit={event => { event.preventDefault(); submit(); }} className="flex flex-col gap-3">
           <label htmlFor="private-answer" className={`flex items-center gap-2 text-sm font-semibold ${muted}`}><LockKeyhole size={14} aria-hidden="true" />Your private answer</label>
-          <textarea id="private-answer" aria-describedby="private-answer-counter private-answer-help" maxLength={ANSWER_LIMIT} rows={4} value={text} readOnly={isLocked} disabled={remaining === 0} onChange={event => { if (!lockedRef.current) setText(event.target.value.slice(0, ANSWER_LIMIT)); }} placeholder="Write your answer..." className={`max-h-56 min-h-32 w-full resize-y rounded-xl border p-3 text-base leading-relaxed focus:outline-2 focus:outline-offset-2 disabled:opacity-50 ${isDarkMode ? 'border-[#00E5FF]/40 bg-black/30 text-white placeholder:text-[#8495B3] focus:outline-[#00E5FF]' : 'border-[#16223B]/40 bg-white/25 text-[#0E1726] placeholder:text-[#526078] focus:outline-[#16223B]'}`} />
+          <textarea id="private-answer" aria-describedby="private-answer-counter private-answer-help" maxLength={ANSWER_LIMIT} rows={4} value={text} readOnly={isLocked} disabled={remaining === 0} onChange={event => { if (!lockedRef.current) setText(event.target.value.slice(0, ANSWER_LIMIT)); }} onKeyDown={event => {
+              // Enter locks in the answer, like the chat boxes; Shift+Enter still adds a line break.
+              if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); submit(); }
+            }} placeholder="Write your answer..." className={`max-h-56 min-h-32 w-full resize-y rounded-xl border p-3 text-base leading-relaxed focus:outline-2 focus:outline-offset-2 disabled:opacity-50 ${isDarkMode ? 'border-[#00E5FF]/40 bg-black/30 text-white placeholder:text-[#8495B3] focus:outline-[#00E5FF]' : 'border-[#16223B]/40 bg-white/25 text-[#0E1726] placeholder:text-[#526078] focus:outline-[#16223B]'}`} />
           <div className="flex items-center justify-between gap-2">
-            <p id="private-answer-help" className={`text-xs ${muted}`}>Only you can see this answer.</p>
+            <p id="private-answer-help" className={`text-xs ${muted}`}>Only you can see this answer. Press Enter to lock it in.</p>
             <span id="private-answer-counter" className={`shrink-0 font-pixel text-[9px] ${text.length >= 250 ? (isDarkMode ? 'text-[#FFADBF]' : 'text-[#8B1634]') : accent}`}>[ {text.length} / {ANSWER_LIMIT} ]</span>
           </div>
           {error && <p role="alert" className={`text-sm ${isDarkMode ? 'text-[#FFADBF]' : 'text-[#8B1634]'}`}>{error}</p>}

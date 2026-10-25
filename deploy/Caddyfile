@@ -1,32 +1,25 @@
-# Copy to /etc/caddy/Caddyfile on the Vultr VM, then: sudo systemctl reload caddy
-# Caddy gets HTTPS certificates automatically and proxies WebSockets with no extra config.
+# Copy to /etc/caddy/Caddyfile on the Vultr VM, then: systemctl reload caddy
+# Caddy gets HTTPS certificates automatically, redirects http → https, and proxies
+# WebSockets with no extra config. Needs amuse-us.tech's A records pointing at the VM.
 #
-# STEP A (right away): plain HTTP on the VM's IP address. Phones open http://<VM_IP>
-# STEP B (once amuse-us.tech has an A record pointing at the VM and `dig +short amuse-us.tech` shows the IP):
-#         delete the ":80 { ... }" block, uncomment the domain block, reload.
+# Before the domain worked we used a plain ":80 { ... }" block on the VM's IP instead.
 
-:80 {
+amuse-us.tech, www.amuse-us.tech {
 	encode zstd gzip
+
+	# Game server (Socket.IO + health check).
 	handle /socket.io/* {
 		reverse_proxy localhost:4000
 	}
 	handle /health {
 		reverse_proxy localhost:4000
 	}
+
+	# Frontend: the Vite build in /opt/game/apps/web/dist (built by deploy/deploy.sh).
+	# Unknown paths fall back to index.html so links like /join/ABCD work.
 	handle {
-		reverse_proxy localhost:3000
+		root * /opt/game/apps/web/dist
+		try_files {path} /index.html
+		file_server
 	}
 }
-
-# amuse-us.tech, www.amuse-us.tech {
-# 	encode zstd gzip
-# 	handle /socket.io/* {
-# 		reverse_proxy localhost:4000
-# 	}
-# 	handle /health {
-# 		reverse_proxy localhost:4000
-# 	}
-# 	handle {
-# 		reverse_proxy localhost:3000
-# 	}
-# }

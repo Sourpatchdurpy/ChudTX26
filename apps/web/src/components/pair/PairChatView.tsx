@@ -31,7 +31,9 @@ export default function PairChatView({
   const [result, setResult] = useState(myResult ?? '');
   const [resultStatus, setResultStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>(myResult ? 'saved' : 'idle');
   const [resultError, setResultError] = useState('');
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const logRef = useRef<HTMLDivElement>(null);
+  /** True while the reader is at (or near) the newest message. */
+  const stickToBottomRef = useRef(true);
   const reduceMotion = !!useReducedMotion();
   const viewportHeight = useVisualViewportHeight();
   const open = remaining > 0;
@@ -46,12 +48,17 @@ export default function PairChatView({
     const timer = setInterval(() => setRemaining(Math.max(0, Math.ceil((deadline - Date.now()) / 1000))), 250);
     return () => clearInterval(timer);
   }, [deadline]);
-  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'nearest' }); }, [messages, reduceMotion]);
+  // Follow new messages only when one arrives, and only if the reader is already at the bottom.
+  useEffect(() => {
+    const log = logRef.current;
+    if (log && stickToBottomRef.current) log.scrollTop = log.scrollHeight;
+  }, [messages.length]);
 
   function send() {
     const text = inputText.trim();
     if (!open || holding || !text || text.length > LIMITS.chatMaxChars) return;
     onSendMessage(text);
+    stickToBottomRef.current = true;
     setInputText('');
     setHoldUntil(Date.now() + HOLD_SECONDS * 1000);
     setTimeout(() => setHoldUntil(0), HOLD_SECONDS * 1000);
@@ -93,7 +100,7 @@ export default function PairChatView({
 
       <div className={`relative flex min-h-0 flex-1 flex-col gap-3 rounded-2xl border-2 p-3 backdrop-blur-xs ${glass}`}>
         <PixelCorners />
-        <div role="log" aria-label="Pair messages" aria-live="polite" aria-relevant="additions" className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain py-1 pr-1">
+        <div ref={logRef} onScroll={event => { const log = event.currentTarget; stickToBottomRef.current = log.scrollHeight - log.scrollTop - log.clientHeight < 80; }} role="log" aria-label="Pair messages" aria-live="polite" aria-relevant="additions" className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain py-1 pr-1">
           {messages.length === 0 && <p className={`py-6 text-center text-sm ${muted}`}>Say hi. Only your pair can see this chat.</p>}
           {messages.map(message => {
             const self = message.senderNickname === currentUserNickname;
@@ -102,7 +109,6 @@ export default function PairChatView({
               <div className={`max-w-[85%] whitespace-pre-wrap break-words rounded-xl border-2 p-3 text-sm leading-relaxed ${self ? (isDarkMode ? 'border-[#00E5FF] bg-gradient-to-r from-[#0066FF] to-[#0052CC] text-white' : 'border-[#16223B]/60 bg-white/50 text-[#0E1726]') : (isDarkMode ? 'border-[#1E2E6B] bg-[#0D153A]/80 text-white' : 'border-[#16223B]/30 bg-white/25 text-[#0E1726]')}`}>{message.text}</div>
             </motion.div>;
           })}
-          <div ref={messagesEndRef} />
         </div>
         <form onSubmit={event => { event.preventDefault(); send(); }} className="flex shrink-0 items-end gap-2">
           <textarea rows={1} aria-label="Pair message" maxLength={LIMITS.chatMaxChars} value={inputText} disabled={!open} onChange={event => setInputText(event.target.value.slice(0, LIMITS.chatMaxChars))} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send(); } }} placeholder={open ? 'Message your partner...' : 'Pair chat is closed'} className={`max-h-24 min-h-11 min-w-0 flex-1 resize-none rounded-xl border px-3 py-2 text-base focus:outline-2 focus:outline-offset-1 disabled:opacity-50 sm:text-sm ${field}`} />

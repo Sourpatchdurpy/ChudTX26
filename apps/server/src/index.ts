@@ -25,7 +25,7 @@ const ai: AiImpl = mode === "muse" ? await import("./ai/index.js") : await impor
 
 const content = loadContent();
 const port = Number(process.env.PORT) || 4000;
-const corsOrigins = (process.env.CORS_ORIGIN ?? "http://localhost:3000")
+const corsOrigins = (process.env.CORS_ORIGIN ?? "http://localhost:3000,http://127.0.0.1:3000")
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean);
@@ -72,6 +72,12 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     io.close();
   });
 }
+
+// E.g. the port is already taken: fail loudly (non-zero exit) instead of exiting "cleanly".
+httpServer.on("error", (e) => {
+  log(`[server] cannot listen on :${port}: ${e.message}`);
+  process.exit(1);
+});
 
 httpServer.listen(port, () => {
   log(
