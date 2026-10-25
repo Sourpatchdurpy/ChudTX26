@@ -2,9 +2,15 @@
 # Build and (re)start the app on the VM. Run from anywhere: bash /opt/game/deploy/deploy.sh
 # Requires package-lock.json to be committed (npm ci refuses to run without it).
 set -euo pipefail
-cd "$(dirname "$0")/.."
+SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+cd "$(dirname "$SELF")/.."
 
-git pull --ff-only || true
+# Pull, then restart this script so the rest always runs the version just pulled
+# (otherwise bash keeps executing the old copy that was already loaded).
+if [ "${DEPLOY_PULLED:-}" != 1 ]; then
+  git pull --ff-only || true
+  DEPLOY_PULLED=1 exec bash "$SELF" "$@"
+fi
 # tsx (which runs the server) is a devDependency, so install dev deps even if NODE_ENV=production.
 npm ci --include=dev
 if [ -f index.html ]; then
