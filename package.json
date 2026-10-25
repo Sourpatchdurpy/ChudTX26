@@ -1,0 +1,16 @@
+{
+  "name": "hacktx26-game",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,web -c blue,magenta \"npm run dev -w @game/server\" \"npm run dev -w @game/web\"",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "build:web": "npm run build -w @game/web"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

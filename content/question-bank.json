@@ -1,0 +1,57 @@
+{
+  "_readme": "Edit freely. To add a question, copy any entry into the right tier and give it a new unique id (L/P/D/C + number). To remove one, delete its entry. Round 1 draws one random `light` question, round 2 one random `personal` question, and round 3 one random `collab` card (every pair gets the same card). `deep` questions are only used inside collab cards: a card containing {deep} gets a random deep question substituted in. Each collab card's `submitPrompt` is what each partner types as their one result. Tags are optional labels for sorting and pruning; the game logic does not depend on them. Keep everything comfortable for strangers, since judges will be playing.",
+  "rounds": ["light", "personal", "collab"],
+  "tiers": {
+    "light": [
+      { "id": "L01", "text": "Rank these and defend your #1: breakfast tacos, brisket, queso, boba.", "tags": ["food"] },
+      { "id": "L02", "text": "You get a free afternoon in Austin after this hackathon. What are you actually doing?", "tags": ["activity", "place"] },
+      { "id": "L03", "text": "Pick one for a group hangout: bowling, karaoke, a board game cafe, or a late-night food run. Convince the others.", "tags": ["activity"] },
+      { "id": "L04", "text": "What's a food everyone else thinks is mid that you'll defend forever?", "tags": ["food"] },
+      { "id": "L05", "text": "What's your go-to order at the place you go to way too often?", "tags": ["food"] },
+      { "id": "L06", "text": "Last song you had on repeat, and what were you doing when you played it?", "tags": ["music"] },
+      { "id": "L07", "text": "What's the most niche topic you could talk about for 10 minutes without notes?", "tags": ["interests"] },
+      { "id": "L08", "text": "What's one thing in your bag right now that would surprise us?", "tags": ["story"] },
+      { "id": "L09", "text": "Best and worst food at this hackathon so far. Go.", "tags": ["event", "food"] },
+      { "id": "L10", "text": "What's a show, game, or creator you got way too into this year?", "tags": ["interests"] },
+      { "id": "L11", "text": "Hot take about hackathons. Defend it.", "tags": ["event"] },
+      { "id": "L12", "text": "What's your ideal late-night snack after a long coding session?", "tags": ["food"] },
+      { "id": "L13", "text": "What's the last trending thing you saw that you had an opinion on?", "tags": ["this-week"] },
+      { "id": "L14", "text": "What's something from this week you can't stop thinking about?", "tags": ["this-week"] }
+    ],
+    "personal": [
+      { "id": "P01", "text": "What's a small thing that made your week better?", "tags": ["story"] },
+      { "id": "P02", "text": "Tell us about a time you were confidently wrong.", "tags": ["story"] },
+      { "id": "P03", "text": "What's a skill you picked up for a weird reason?", "tags": ["story"] },
+      { "id": "P04", "text": "What were you obsessed with as a kid that you'd still defend today?", "tags": ["story", "interests"] },
+      { "id": "P05", "text": "What's the most spontaneous thing you've done in the last year?", "tags": ["story", "activity"] },
+      { "id": "P06", "text": "What's a place that feels like home that isn't actually your home?", "tags": ["place"] },
+      { "id": "P07", "text": "What's the best advice you ignored?", "tags": ["story"] },
+      { "id": "P08", "text": "What's a hobby you started and quit? What made you quit?", "tags": ["interests"] },
+      { "id": "P09", "text": "Describe your perfect Saturday with zero responsibilities.", "tags": ["activity"] },
+      { "id": "P10", "text": "What's a tradition from your family or friend group that outsiders find strange?", "tags": ["story"] },
+      { "id": "P11", "text": "What's the most memorable meal you've ever had, and who were you with?", "tags": ["food", "story"] },
+      { "id": "P12", "text": "What's the best or worst thing that happened to you this week?", "tags": ["this-week", "story"] }
+    ],
+    "deep": [
+      { "id": "D01", "text": "What's something you're proud of that nobody really asks you about?", "tags": ["values"] },
+      { "id": "D02", "text": "What's a belief you held strongly a few years ago that you've changed your mind on?", "tags": ["values"] },
+      { "id": "D03", "text": "What does a really good day with friends look like for you?", "tags": ["activity", "values"] },
+      { "id": "D04", "text": "What's something you want to get better at this year, and why that?", "tags": ["values"] },
+      { "id": "D05", "text": "When was the last time you felt really understood by someone?", "tags": ["story", "values"] },
+      { "id": "D06", "text": "If you could have 10 minutes with your younger self, what would you bring up?", "tags": ["values"] },
+      { "id": "D07", "text": "What's a small kindness from a stranger you still remember?", "tags": ["story"] },
+      { "id": "D08", "text": "What's something you're looking forward to that you haven't told many people about?", "tags": ["values"] },
+      { "id": "D09", "text": "What do people usually get wrong about you at first?", "tags": ["values"] },
+      { "id": "D10", "text": "What's one thing you'd want this group to know about you before we leave?", "tags": ["values"] }
+    ]
+  },
+  "collab": [
+    { "id": "C01", "text": "Find two things you have in common that nobody else here would guess.", "submitPrompt": "One thing you two have in common", "tags": ["common-ground"] },
+    { "id": "C02", "text": "Agree on the best late-night food near campus. You both have to defend it to the group.", "submitPrompt": "Your pair's pick and your best argument for it", "tags": ["food"] },
+    { "id": "C03", "text": "Each of you asks the other one question. Answer honestly.", "submitPrompt": "The most surprising thing you learned about your partner", "tags": ["story"] },
+    { "id": "C04", "text": "Plan a perfect Saturday using one idea from each of you.", "submitPrompt": "Your idea for the Saturday, in one line", "tags": ["activity"] },
+    { "id": "C05", "text": "Teach each other one weird skill or fact in two messages.", "submitPrompt": "What your partner taught you", "tags": ["story"] },
+    { "id": "C06", "text": "Find one thing you completely disagree on, and settle it.", "submitPrompt": "What you disagreed on, and who won", "tags": ["debate"] },
+    { "id": "C07", "text": "Both of you answer this, then find what your answers have in common: {deep}", "submitPrompt": "What your answers had in common", "tags": ["values"] }
+  ]
+}
