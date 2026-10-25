@@ -27,7 +27,7 @@ pm2 startOrReload deploy/ecosystem.config.cjs
 pm2 save
 # The server takes a moment to boot after a reload.
 for i in $(seq 1 15); do
-  if curl -fsS http://localhost:4000/health; then
+  if curl -fs http://localhost:4000/health; then
     echo " ← game server healthy"
     exit 0
   fi
