@@ -49,9 +49,9 @@ The deployed game runs on **Part 4's** Muse key (team decision). Part 4 SSHes in
 
 ## 6. Domain + HTTPS (once the .tech name is registered)
 1. At the registrar, add `A` records for `@` and `www` pointing to `VM_IP`.
-2. Wait until `dig +short yourname.tech` prints `VM_IP`.
+2. Wait until `dig +short amuse-us.tech` prints `VM_IP`.
 3. In `/etc/caddy/Caddyfile`, delete the `:80 { ... }` block, uncomment the domain block and put in the real name.
-4. `systemctl reload caddy`. Caddy gets certificates automatically; check `https://yourname.tech/health`.
+4. `systemctl reload caddy`. Caddy gets certificates automatically; check `https://amuse-us.tech/health`.
 
 ## Troubleshooting
 | Symptom | Check |

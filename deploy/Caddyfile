@@ -2,8 +2,8 @@
 # Caddy gets HTTPS certificates automatically and proxies WebSockets with no extra config.
 #
 # STEP A (right away): plain HTTP on the VM's IP address. Phones open http://<VM_IP>
-# STEP B (once yourname.tech has an A record pointing at the VM and `dig yourname.tech` shows the IP):
-#         delete the ":80 { ... }" block, uncomment the domain block, set your real domain, reload.
+# STEP B (once amuse-us.tech has an A record pointing at the VM and `dig +short amuse-us.tech` shows the IP):
+#         delete the ":80 { ... }" block, uncomment the domain block, reload.
 
 :80 {
 	encode zstd gzip
@@ -18,7 +18,7 @@
 	}
 }
 
-# yourname.tech, www.yourname.tech {
+# amuse-us.tech, www.amuse-us.tech {
 # 	encode zstd gzip
 # 	handle /socket.io/* {
 # 		reverse_proxy localhost:4000
