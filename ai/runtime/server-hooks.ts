@@ -33,7 +33,7 @@ export function preparePersonaWithDeadline(options:{world:WorldContext;call:Muse
     const finish=(persona?:Persona)=>{
       if(settled)return;settled=true;clearTimeout(timer);options.signal?.removeEventListener("abort",cancel);scope.abort();
       const selected=structuredClone(persona??supplier());
-      Object.freeze(selected.interests);Object.freeze(selected.facts);Object.freeze(selected.opinions);Object.freeze(selected.thisWeek);Object.freeze(selected.style.slang);Object.freeze(selected.style);Object.freeze(selected);
+      Object.freeze(selected.interests);Object.freeze(selected.facts);Object.freeze(selected.opinions);Object.freeze(selected.thisWeek);Object.freeze(selected);
       resolve(selected);
     };
     const cancel=()=>finish();

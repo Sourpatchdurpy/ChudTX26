@@ -4,9 +4,10 @@ import { buildRequest } from "../prompts.js";
 import { humanize } from "../humanize.js";
 import { fallbackText } from "../fallbacks.js";
 import { outputSchema, schemaError } from "../schemas.js";
-import { validateOutput } from "../validate.js";
+import { validateOutput, validatePerspective } from "../validate.js";
 import type { PlayerTurnContext } from "../types.js";
 import { abortable, throwIfAborted } from "./abort.js";
+import { inferWritingStyle } from "../writing-style.js";
 
 export interface TurnResult { action:"send"|"skip";text:string;note:string;fallback:boolean;regenerations:number;raw?:unknown;attemptResults?:{raw:unknown;error?:string}[] }
 export function validateStructuredOutput(value:unknown,mode:AiMode,ctx:PlayerTurnContext):TurnResult {
@@ -18,15 +19,16 @@ export function validateStructuredOutput(value:unknown,mode:AiMode,ctx:PlayerTur
   }
   const raw=obj[mode==="answer"?"answer":mode==="collab"?"result":"message"]!;
   const before=validateOutput(raw);if(!before.ok)throw new Error(before.reason);
-  const text=humanize(raw,ctx.style,ctx.persona),valid=validateOutput(text);
+  const perspective=validatePerspective(raw,ctx);if(!perspective.ok)throw new Error(perspective.reason);
+  const text=humanize(raw,inferWritingStyle(ctx).style,ctx.persona),valid=validateOutput(text);
   const limit=mode==="answer"?LIMITS.answerMaxChars:mode==="collab"?LIMITS.collabMaxChars:LIMITS.chatMaxChars;
   if(!valid.ok||text.length>limit)throw new Error(valid.ok?"mode character limit":valid.reason);
   return {action:"send",text,note:obj.note!,fallback:false,regenerations:0,raw:value};
 }
 export function safeFallback(ctx:PlayerTurnContext):TurnResult {
-  const text=humanize(fallbackText(ctx.mode,ctx),ctx.style,ctx.persona);
   const field=ctx.mode==="answer"?"answer":ctx.mode==="collab"?"result":"message";
   try {
+    const text=humanize(fallbackText(ctx.mode,ctx),inferWritingStyle(ctx).style,ctx.persona);
     return {...validateStructuredOutput({...(["group","pair"].includes(ctx.mode)?{action:"send"}:{}),[field]:text,note:"I kept it simple when my reply wasn't ready"},ctx.mode,ctx),fallback:true};
   } catch {return {action:"send",text:ctx.mode==="collab"?"still figuring it out":"still thinking about that",note:"I kept it brief",fallback:true,regenerations:0};}
 }
