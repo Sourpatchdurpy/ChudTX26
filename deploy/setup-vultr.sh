@@ -25,6 +25,6 @@ ufw --force enable
 
 echo "Done. Next:"
 echo "  git clone <repo> /opt/game && cd /opt/game"
-echo "  create /opt/game/.env (AI_MODE=muse, MODEL_API_KEY=...)"
+echo "  cp .env.example .env   (keep AI_MODE=stub; Part 4 adds MODEL_API_KEY themselves later)"
 echo "  cp deploy/Caddyfile /etc/caddy/Caddyfile && systemctl reload caddy"
 echo "  bash deploy/deploy.sh && pm2 save && pm2 startup"
