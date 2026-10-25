@@ -7,11 +7,15 @@ cd "$(dirname "$0")/.."
 git pull --ff-only || true
 # tsx (which runs the server) is a devDependency, so install dev deps even if NODE_ENV=production.
 npm ci --include=dev
-if [ -f apps/web/package.json ]; then
+if [ -f index.html ]; then
+  # Vite frontend at the repo root: builds to dist/, which Caddy serves as static files.
+  # A failed build (or typecheck) stops here, so the previous version keeps running.
+  npm run build
+elif [ -f apps/web/package.json ]; then
   # Production web build talks to the same origin, so NEXT_PUBLIC_SERVER_URL stays empty.
   NEXT_PUBLIC_SERVER_URL= npm run build -w @game/web
 else
-  echo "apps/web not found yet: skipping the web build (server only)"
+  echo "no frontend found: skipping the web build (server only)"
 fi
 pm2 startOrReload deploy/ecosystem.config.cjs
 pm2 save
