@@ -1,4 +1,7 @@
-const CODENAMES = ['CYBER_FOX', 'NEON_VIPER', 'ECHO_01', 'GHOST_BYTE', 'CIPHER_99'];
+import { NICKNAMES } from '@game/shared';
+
+// The server's list (the AI draws from it too), so a picked codename never stands out.
+const CODENAMES = NICKNAMES.map(n => n.nickname);
 const CODE_CHARACTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
 
 export function generateCodename(previous = '') {

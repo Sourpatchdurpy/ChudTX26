@@ -101,8 +101,8 @@ export function useGame() {
   const actions = useMemo(() => {
     const s = getSocket();
     return {
-      async create(realName: string, codename?: string) {
-        const res = await call<{ code: string; playerId: PlayerId; token: string }>(ack => s.emit('room:create', { realName, codename }, ack));
+      async create(realName: string, codename?: string, code?: string) {
+        const res = await call<{ code: string; playerId: PlayerId; token: string }>(ack => s.emit('room:create', { realName, codename, code }, ack));
         saveSession({ code: res.code, token: res.token });
         setClosedReason('');
       },
@@ -111,11 +111,11 @@ export function useGame() {
         saveSession({ code: code.toUpperCase(), token: res.token });
         setClosedReason('');
       },
-      /** Forget the seat locally. A fresh connection makes the server drop this socket. */
+      /** Leave for good (lobby: removed from the list; host: room closes), then forget the seat. */
       leave() {
+        s.emit('room:leave', () => undefined);
         clearSession();
         setView(null);
-        s.disconnect().connect();
       },
       start: () => call(ack => s.emit('game:start', ack)),
       answer: (text: string) => call(ack => s.emit('answer:submit', { text }, ack)),

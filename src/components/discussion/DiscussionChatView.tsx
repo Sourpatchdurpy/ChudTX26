@@ -42,10 +42,10 @@ function Message({ message, self, isDarkMode, reduceMotion }: { message: Discuss
 
 export default function DiscussionChatView({
   isDarkMode, onToggleTheme, question, answers, messages, currentUserNickname,
-  onSendMessage, onDiscussionEnd, initialSeconds = ROUND_SECONDS,
+  onSendMessage, onDiscussionEnd, initialSeconds = ROUND_SECONDS, maxSeconds = ROUND_SECONDS, asideExtra,
 }: DiscussionChatViewProps) {
-  // initialSeconds can resume a running round, but cannot extend it beyond 50s.
-  const [startSeconds] = useState(() => Number.isFinite(initialSeconds) ? Math.min(ROUND_SECONDS, Math.max(0, initialSeconds)) : ROUND_SECONDS);
+  // initialSeconds can resume a running round, but cannot extend it beyond maxSeconds (50s by default).
+  const [startSeconds] = useState(() => Number.isFinite(initialSeconds) ? Math.min(maxSeconds, Math.max(0, initialSeconds)) : maxSeconds);
   const [remaining, setRemaining] = useState(Math.ceil(startSeconds));
   const [inputText, setInputText] = useState('');
   const [holding, setHolding] = useState(false);
@@ -148,6 +148,7 @@ export default function DiscussionChatView({
           <p className={`mb-2 font-pixel text-[9px] leading-relaxed ${accent}`}>ROUND QUESTION</p>
           {question ? <p className="max-h-16 overflow-y-auto break-words text-sm font-bold leading-relaxed sm:max-h-24 lg:max-h-64 lg:text-lg">{question}</p> : <p className={`text-sm ${muted}`}>Waiting for the game question</p>}
         </div>
+        {asideExtra}
         <div className={`hidden items-center justify-between pt-3 font-pixel text-[9px] lg:flex ${accent}`}><span>SUBMITTED ANSWERS</span><span>{answers.length}</span></div>
         <ul aria-label="Submitted answers" tabIndex={0} className={`flex gap-2 overflow-x-auto py-1 lg:flex-col lg:overflow-x-hidden ${focusClass}`}>
           {shuffledAnswers.map(answer => <AnswerPill key={answer.id} answer={answer} isDarkMode={isDarkMode} />)}

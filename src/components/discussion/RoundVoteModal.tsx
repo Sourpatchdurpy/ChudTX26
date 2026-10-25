@@ -7,7 +7,7 @@ export type { RoundVoteModalProps, VoteOption, RoundVoteResult } from '@/types/g
 
 const VOTE_SECONDS = 20;
 
-export default function RoundVoteModal({ isDarkMode, secondsRemaining, candidates, onCastVote, roundResult = null }: RoundVoteModalProps) {
+export default function RoundVoteModal({ isDarkMode, secondsRemaining, candidates, onCastVote, roundResult = null, tally = null }: RoundVoteModalProps) {
   const seconds = Number.isFinite(secondsRemaining) ? Math.min(VOTE_SECONDS, Math.max(0, Math.ceil(secondsRemaining))) : 0;
   const [selected, setSelected] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
@@ -48,10 +48,11 @@ export default function RoundVoteModal({ isDarkMode, secondsRemaining, candidate
       previousFocus?.focus();
     };
   }, []);
-  useEffect(() => { if (roundResult) dialogRef.current?.focus(); }, [roundResult]);
+  const showResult = !!roundResult || !!tally;
+  useEffect(() => { if (showResult) dialogRef.current?.focus(); }, [showResult]);
 
   async function castVote(nickname: string) {
-    if (submittedRef.current || seconds <= 0 || roundResult || Date.now() >= deadlineRef.current) return;
+    if (submittedRef.current || seconds <= 0 || showResult || Date.now() >= deadlineRef.current) return;
     submittedRef.current = true;
     setSelected(nickname);
     setIsSending(true);
@@ -78,14 +79,18 @@ export default function RoundVoteModal({ isDarkMode, secondsRemaining, candidate
           <h2 id="round-vote-title" className={`font-pixel text-xs leading-loose sm:text-sm ${accent}`}>VOTE THE IMPOSTER</h2>
           <span role="timer" aria-label={`${seconds} seconds remaining`} className={`shrink-0 font-pixel text-xs ${isDarkMode ? 'text-[#FF8CA4]' : 'text-[#9E173B]'}`}>{seconds}s</span>
         </div>
-        <motion.div aria-hidden="true" initial={false} animate={reduceMotion || roundResult || seconds === 0 ? { opacity: 1 } : { opacity: [1, 0.55, 1] }} transition={{ duration: 1, repeat: Infinity }} className={`h-2 overflow-hidden border ${isDarkMode ? 'border-[#FF5376]/40 bg-black/30' : 'border-[#9E173B]/30 bg-white/20'}`}>
+        <motion.div aria-hidden="true" initial={false} animate={reduceMotion || showResult || seconds === 0 ? { opacity: 1 } : { opacity: [1, 0.55, 1] }} transition={{ duration: 1, repeat: Infinity }} className={`h-2 overflow-hidden border ${isDarkMode ? 'border-[#FF5376]/40 bg-black/30' : 'border-[#9E173B]/30 bg-white/20'}`}>
           <motion.div initial={false} animate={{ width: `${seconds / VOTE_SECONDS * 100}%` }} transition={{ duration: reduceMotion ? 0 : 0.2 }} className="h-full bg-[#FF5376]" />
         </motion.div>
-        <p id="round-vote-description" className={`text-xs leading-relaxed ${muted}`}>{roundResult ? 'The votes are in.' : 'Choose the codename you believe belongs to the AI. Your vote locks when selected.'}</p>
+        <p id="round-vote-description" className={`text-xs leading-relaxed ${muted}`}>{showResult ? 'The votes are in.' : 'Choose the codename you believe belongs to the AI. Your vote locks when selected.'}</p>
       </header>
 
       <AnimatePresence mode="wait" initial={false}>
-        {roundResult ? <motion.div key="result" role="status" initial={{ opacity: 0, scale: reduceMotion ? 1 : 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: reduceMotion ? 0 : 0.25 }} className={`flex min-h-48 min-w-0 flex-col items-center justify-center gap-4 overflow-y-auto rounded-xl border-2 p-5 text-center ${isStalemate ? (isDarkMode ? 'border-[#00E5FF]/50 bg-[#00E5FF]/5' : 'border-[#16223B]/40 bg-white/20') : roundResult.wasAi ? 'border-[#38EF7D] bg-[#38EF7D]/10' : 'border-[#FF5376] bg-[#FF5376]/10'}`}>
+        {tally ? <motion.div key="tally" role="status" initial={{ opacity: 0, scale: reduceMotion ? 1 : 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: reduceMotion ? 0 : 0.25 }} className={`flex min-h-48 min-w-0 flex-col items-center justify-center gap-4 overflow-y-auto rounded-xl border-2 p-5 text-center ${isDarkMode ? "border-[#00E5FF]/50 bg-[#00E5FF]/5" : "border-[#16223B]/40 bg-white/20"}`}>
+          <p className={`break-words font-pixel text-xs leading-loose sm:text-sm ${accent}`}>[ VOTES IN // NOBODY LEAVES ]</p>
+          <ul aria-label="Vote counts" className="w-full space-y-2">{[...tally].sort((a, b) => b.votes - a.votes).map(t => <li key={t.nickname} className="flex items-center justify-between gap-3 text-sm"><span className={`break-words font-pixel text-[10px] leading-loose ${accent}`}>{t.nickname}</span><span className="font-pixel text-[10px]">{t.votes}</span></li>)}</ul>
+          <p className={`text-sm ${muted}`}>Everyone stays in the game. Advancing to the next round.</p>
+        </motion.div> : roundResult ? <motion.div key="result" role="status" initial={{ opacity: 0, scale: reduceMotion ? 1 : 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: reduceMotion ? 0 : 0.25 }} className={`flex min-h-48 min-w-0 flex-col items-center justify-center gap-4 overflow-y-auto rounded-xl border-2 p-5 text-center ${isStalemate ? (isDarkMode ? 'border-[#00E5FF]/50 bg-[#00E5FF]/5' : 'border-[#16223B]/40 bg-white/20') : roundResult.wasAi ? 'border-[#38EF7D] bg-[#38EF7D]/10' : 'border-[#FF5376] bg-[#FF5376]/10'}`}>
           <p className={`break-words font-pixel text-xs leading-loose sm:text-sm ${isStalemate ? accent : roundResult.wasAi ? (isDarkMode ? 'text-[#38EF7D] [text-shadow:0_0_12px_#38EF7D60]' : 'text-[#126438]') : (isDarkMode ? 'text-[#FF8CA4]' : 'text-[#9E173B]')}`}>
             {isStalemate ? '[ STALEMATE: NO CONSENSUS ]' : roundResult.wasAi ? '[ IMPOSTER DETECTED // PROTOCOL BREACHED ]' : `[ ${roundResult.eliminatedNickname} IS HUMAN // CLEARED ]`}
           </p>

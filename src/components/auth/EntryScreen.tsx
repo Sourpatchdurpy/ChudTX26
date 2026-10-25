@@ -23,18 +23,19 @@ function PixelFrame({ isDarkMode }: { isDarkMode: boolean }) {
   </div>;
 }
 
-export default function EntryScreen({ onEnter, isDarkMode, onToggleTheme }: EntryScreenProps) {
+export default function EntryScreen({ onEnter, isDarkMode, onToggleTheme, initialError }: EntryScreenProps) {
   const [nickname, setNickname] = useState(() => generateCodename());
+  const [realName, setRealName] = useState('');
   const [roomCode, setRoomCode] = useState('');
   const [isHost, setIsHost] = useState(false);
   const [hostCode, setHostCode] = useState(() => generateRoomCode());
   const [rerolls, setRerolls] = useState(0);
-  const [entryError, setEntryError] = useState('');
+  const [entryError, setEntryError] = useState(initialError ?? '');
   const [isEntering, setIsEntering] = useState(false);
   const submittingRef = useRef(false);
   const reduceMotion = useReducedMotion();
   const activeCode = isHost ? hostCode : roomCode;
-  const validCode = /^[A-Z0-9]{4}$/.test(activeCode);
+  const validCode = /^[A-Z0-9]{4}$/.test(activeCode) && realName.trim().length > 0;
   const focusClass = `focus-visible:outline-2 focus-visible:outline-offset-4 ${isDarkMode ? 'focus-visible:outline-white' : 'focus-visible:outline-[#0064E0]'}`;
   const muted = isDarkMode ? 'text-[#B5DFFF]' : 'text-[#26374F]';
   const accent = isDarkMode ? 'text-[#00E5FF]' : 'text-[#0E1726]';
@@ -61,7 +62,7 @@ export default function EntryScreen({ onEnter, isDarkMode, onToggleTheme }: Entr
             submittingRef.current = true;
             setIsEntering(true);
             setEntryError('');
-            try { await onEnter({ nickname, roomCode: activeCode, isHost }); }
+            try { await onEnter({ nickname, realName: realName.trim(), roomCode: activeCode, isHost }); }
             catch (error) { setEntryError(error instanceof Error ? error.message : 'Unable to enter this room. Please try again.'); }
             finally { submittingRef.current = false; setIsEntering(false); }
           }} className="flex min-w-0 w-full flex-col gap-4 sm:gap-5">
@@ -74,6 +75,10 @@ export default function EntryScreen({ onEnter, isDarkMode, onToggleTheme }: Entr
                 <p aria-labelledby="codename-label" aria-live="polite" aria-atomic="true" className={`min-w-0 break-words text-xs leading-loose sm:text-sm ${accent}`}>{nickname}</p>
                 <motion.button type="button" aria-label="Reroll codename" title="Reroll codename" disabled={isEntering} onClick={() => { setEntryError(''); setNickname(previous => generateCodename(previous)); setRerolls(value => value + 1); }} animate={{ rotate: reduceMotion ? 0 : rerolls * 180 }} transition={{ type: 'spring', stiffness: 260, damping: 22 }} className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-lg hover:bg-white/15 ${accent} ${focusClass}`}><RotateCw size={18} aria-hidden="true" /></motion.button>
               </div>
+            </div>
+            <div>
+              <label htmlFor="entry-real-name" className={`mb-2 block text-[8px] leading-relaxed tracking-wider sm:text-[10px] ${muted}`}>YOUR FIRST NAME</label>
+              <input id="entry-real-name" type="text" required autoComplete="given-name" maxLength={20} disabled={isEntering} value={realName} onChange={event => { setEntryError(''); setRealName(event.target.value.slice(0, 20)); }} placeholder="NAME" className={`w-full rounded-xl border p-3 text-xs leading-loose sm:text-sm focus:outline-2 focus:outline-offset-4 ${capsule} ${isDarkMode ? 'text-[#00E5FF] placeholder:text-[#7D9CBD] focus:outline-white' : 'text-[#0E1726] placeholder:text-[#526078] focus:outline-[#0E1726]'}`} />
             </div>
             <motion.div key={isHost ? 'host' : 'join'} initial={{ opacity: reduceMotion ? 1 : 0 }} animate={{ opacity: 1 }} transition={{ duration: reduceMotion ? 0 : 0.15 }}>
               {isHost ? <>

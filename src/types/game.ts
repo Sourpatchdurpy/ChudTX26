@@ -1,5 +1,7 @@
 export interface EntryIdentity {
   nickname: string;
+  /** Real first name: only revealed at the end of the game. */
+  realName: string;
   roomCode: string;
   isHost: boolean;
 }
@@ -8,6 +10,8 @@ export interface EntryScreenProps {
   onEnter: (identity: EntryIdentity) => void | Promise<void>;
   isDarkMode: boolean;
   onToggleTheme: () => void;
+  /** Shown in the existing error box, e.g. why the previous room closed. */
+  initialError?: string;
 }
 
 export interface Player {
@@ -69,6 +73,10 @@ export interface DiscussionChatViewProps {
   onSendMessage?: (text: string) => void;
   onDiscussionEnd: () => void;
   initialSeconds?: number;
+  /** Longest countdown this screen allows (default 50s); round 3's pair chat runs 90s. */
+  maxSeconds?: number;
+  /** Optional content under the question card (round 3: partner + result box). */
+  asideExtra?: React.ReactNode;
 }
 
 export interface PrivateAnswerViewProps {
@@ -101,6 +109,8 @@ export interface RoundVoteModalProps {
   candidates: VoteOption[];
   onCastVote: (targetNickname: string) => void;
   roundResult?: RoundVoteResult | null;
+  /** Rounds 1–2 result: vote counts per codename (nobody is eliminated). Shown in place of the candidates. */
+  tally?: { nickname: string; votes: number }[] | null;
 }
 
 export interface PlayerSummary {
