@@ -1,5 +1,10 @@
 # Development tuning log
 
+## October 28, 2026 — unprompted turns (live server on Gemini 3.5 Flash-Lite)
+
+- Prompt version is now `conversation-9`. `activeTask.instruction` for turns where the AI wasn't addressed now has three variants instead of "reply once only if you add something useful, otherwise skip": a group opener (a specific reaction to another player's revealed answer; don't skip), a pair opener (one friendly line toward the card; don't skip) and a chime-in (your own quick take, not just agreement; skip only for bare acknowledgements).
+- Why: in two live games on Gemini 3.5 Flash-Lite, the controller's openers and join-ins fired, but the model returned `skip` for 5 of 6 such turns, so the AI never started a conversation. Addressed turns were unaffected (8 of 8 answered).
+
 ## Merged-server persona migration
 
 - Migrated server preparation/readiness, stub mode and test fixtures to the current complete persona contract. All server integration boundaries use the root `validatePersona`; generated names, style sections and incomplete sheets are rejected. Removed the legacy stub/last-resort persona constants and use the root fallback pool, including fresh preparation for each stub game.

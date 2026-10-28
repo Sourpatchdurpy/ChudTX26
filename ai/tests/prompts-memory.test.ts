@@ -97,6 +97,16 @@ test("pair and collaboration tasks distinguish partner reply from result submiss
     assert.ok(ctx.view.messages.every(m=>members.includes(m.from)),name);
   }
 });
+test("unaddressed turns: openers don't skip, and a chime-in reacts unless it's bare acknowledgement",()=>{
+  const task=(ctx:ReturnType<typeof fixture>,build:typeof buildGroupChatRequest)=>JSON.parse(build(ctx).messages[1]!.content).activeTask;
+  const opener={...fixture("discuss-addressed"),trigger:{kind:"phaseStart"} as const,addressedToMe:false};
+  const group=task(opener,buildGroupChatRequest);
+  assert.equal(group.kind,"join-conversation");assert.match(group.instruction,/another player's answer/);assert.match(group.instruction,/Do not skip/);
+  assert.match(task(opener,buildPairChatRequest).instruction,/collaboration card/);
+  const chime=task({...fixture("discuss-addressed"),addressedToMe:false},buildGroupChatRequest);
+  assert.equal(chime.kind,"reply-to-message");assert.match(chime.instruction,/chime in/);assert.match(chime.instruction,/just acknowledgements/);
+  assert.match(task(fixture("discuss-addressed"),buildGroupChatRequest).instruction,/^Give one concise reply/);
+});
 test("lab fixtures reject incompatible mode overrides and mocked replies vary with their scenario",()=>{
   assert.throws(()=>fixture("accused-1","answer"),/uses mode 'group'/);
   assert.throws(()=>fixture("r1-answer-light","group"),/uses mode 'answer'/);
