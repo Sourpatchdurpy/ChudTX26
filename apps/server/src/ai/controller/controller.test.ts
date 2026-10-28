@@ -10,7 +10,7 @@ import type {
 } from "@game/shared";
 import type { MuseCallFn, MuseCallOptions } from "../muse.js";
 import { AiController } from "./AiController.js";
-import { classifyMessage, mentionsNickname, quotesAnswer, replyProbability } from "./cadence.js";
+import { classifyMessage, isGroupQuestion, mentionsNickname, quotesAnswer, replyProbability } from "./cadence.js";
 import {computeSendAt} from "./timing.js";
 import { chooseFinalVote, chooseSuspicionVote } from "./decisions.js";
 import type { HumannessDeps, PlayerTurnContext, SessionMemory } from "./deps.js";
@@ -221,11 +221,19 @@ describe("cadence helpers", () => {
     assert.deepEqual(classifyMessage("someone here is a bot", "Fox", []), { addressed: false, accused: false });
   });
 
-  test("ordinary reply probability stays restrained and clamps", () => {
-    assert.equal(replyProbability(0, 0), 0.12);
-    assert.ok(Math.abs(replyProbability(2, 0) - 0.28) < 1e-9);
-    assert.equal(replyProbability(5, 0), 0.35);
-    assert.equal(replyProbability(0, 3), 0.02);
+  test("ordinary reply probability tracks the median human and clamps", () => {
+    assert.equal(replyProbability(0, 0), 0.25);
+    assert.ok(Math.abs(replyProbability(2, 0) - 0.55) < 1e-9);
+    assert.equal(replyProbability(5, 0), 0.6);
+    assert.equal(replyProbability(0, 3), 0.05);
+  });
+
+  test("questions to the whole group are recognized", () => {
+    assert.ok(isGroupQuestion("ok what does everyone actually pick tho?"));
+    assert.ok(isGroupQuestion("anyone else been to tacodeli?"));
+    assert.ok(isGroupQuestion("which one are yall picking"));
+    assert.ok(!isGroupQuestion("everyone picked tacos lol"), "not a question");
+    assert.ok(!isGroupQuestion("which spot tho?"), "a question, but not to the group");
   });
 
   test("even maximum-length chat adds less than 10 seconds of simulated delay",()=>{
@@ -641,5 +649,46 @@ describe("AiController", () => {
     assert.ok(log.includes("record answer answer text true"));
     assert.equal(log.at(-1), "dispose");
     assert.equal(built[0]!.memory, memory);
+  });
+
+  // random 0.5: passes the 85% "aimed at us" roll, fails the ~25–40% ordinary roll and the 45% opener.
+  const mid = () => 0.5;
+
+  test("discuss: a question to the whole group is answered like a direct question", async () => {
+    const calls: MuseLog[] = [], built: PlayerTurnContext[] = [];
+    const game = new FakeGame({ muse: fakeMuse("ok", calls, 500), humanness: fakeHumanness({}, built), random: mid });
+    game.enter("discuss", 1, 45_000, { round: currentRound(1, "light") });
+    game.humanSays("h1", "ok what does everyone actually pick tho?");
+    await advance(12_000);
+    assert.equal(calls.length, 1);
+    assert.equal(built[0]!.addressedToMe, true);
+    assert.equal(game.of("chat").length, 1);
+  });
+
+  test("discuss: a reply right after the AI's own message counts as aimed at it", async () => {
+    const calls: MuseLog[] = [];
+    const game = new FakeGame({ muse: fakeMuse("ok", calls, 500), random: mid });
+    game.enter("discuss", 1, 45_000, { round: currentRound(1, "light") });
+    game.humanSays("h1", "ok what does everyone actually pick tho?");
+    await advance(6_000);
+    assert.equal(game.of("chat").length, 1, "the AI answered the group question");
+    game.humanSays("h2", "nah tacodeli is overrated");
+    await advance(20_000);
+    assert.equal(calls.length, 2);
+    assert.equal(game.of("chat").length, 2, "and replied to the reply");
+  });
+
+  test("discuss: an answer to a direct question isn't thrown away when the chat moves on", async () => {
+    const calls: MuseLog[] = [];
+    const game = new FakeGame({ muse: fakeMuse("ok", calls), random: mid });
+    game.enter("discuss", 1, 45_000, { round: currentRound(1, "light") });
+    game.humanSays("h1", "Fox why tacos tho?");
+    await advance(1_000);
+    game.humanSays("h2", "bowling is so mid");
+    game.humanSays("h3", "nah bowling slaps");
+    game.humanSays("h2", "karaoke is the actual move");
+    await advance(12_000);
+    assert.equal(calls.length, 1, "no second Muse call to redraft");
+    assert.equal(game.of("chat").length, 1);
   });
 });

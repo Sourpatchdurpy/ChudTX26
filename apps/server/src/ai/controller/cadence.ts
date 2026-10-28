@@ -1,9 +1,12 @@
 // When the AI speaks in chat (docs/PART_4_AI_RUNTIME_CONTENT.md §3 "Cadence rules").
+import { asksForChatReply } from "@game/ai";
 import { clamp } from "../util.js";
 export { asksForChatReply, isLowValueChat, isResolvedChat } from "@game/ai";
 
 export const ADDRESSED_REPLY_P = 0.85;
-export const DISCUSS_OPENER_P = 0.15;
+export const DISCUSS_OPENER_P = 0.45;
+/** A reply counts as aimed at the AI if it follows the AI's own message within this long. */
+export const REPLY_WINDOW_MS = 30_000;
 export const PAIR_OPENER_P = 0.5;
 export const PAIR_REPLY_P = 0.9;
 
@@ -50,7 +53,17 @@ export function classifyMessage(text: string, myNickname: string, myAnswers: rea
   return { addressed: mentioned || quoted, accused };
 }
 
-/** Chance to reply to a group message that wasn't addressed to us, from this phase's counts. */
+const GROUP_WORDS_RE = /(^|[^\p{L}\p{N}])(every(one|body)|any(one|body)|any of (you|u)|y'?all|you guys|u guys|guys|all of (you|u)|who here|who else|ppl|people|chat)(?![\p{L}\p{N}])/iu;
+
+/** A question put to the whole group ("what does everyone pick?", "anyone been there?"). */
+export function isGroupQuestion(text: string): boolean {
+  return asksForChatReply(text) && GROUP_WORDS_RE.test(text);
+}
+
+/**
+ * Chance to reply to a group message that wasn't addressed to us, from this phase's counts:
+ * talk about as much as the median human (playtesters found the AI too quiet at 0.12–0.35).
+ */
 export function replyProbability(medianHumanCount: number, myCount: number): number {
-  return clamp(0.12 + 0.08 * (medianHumanCount - myCount), 0.02, 0.35);
+  return clamp(0.25 + 0.15 * (medianHumanCount - myCount), 0.05, 0.6);
 }

@@ -5,8 +5,10 @@ import { uniform } from "../util.js";
 /** Reading the trigger message after it becomes visible. */
 export const READ_DELAY_MS: readonly [number, number] = [800, 1_800];
 export const THINK_DELAY_MS: readonly [number, number] = [200, 700];
-/** Thumb typing speed, chars per second. */
-export const TYPING_CPS: readonly [number, number] = [9, 15];
+/** Thumb typing speed, chars per second (playtesters found 9–15 too slow). */
+export const TYPING_CPS: readonly [number, number] = [12, 18];
+/** Longest pretend typing session, so a long reply never keeps the room waiting. */
+export const TYPING_CAP_MS = 3_500;
 export const CHAT_BATCH_MS = 900;
 
 /** Never send within this long of our last message on the same channel. */
@@ -15,12 +17,12 @@ export const MIN_GAP_MS = 8_000;
 export const MIN_PHASE_LEFT_MS = 4_000;
 /** Answer / collab fallback fires this long before the phase ends. */
 export const DEADLINE_GUARD_MS = 3_000;
-/** Refresh a draft when multiple substantive messages have overtaken it. */
-export const STALE_AFTER_MESSAGES = 2;
+/** Refresh a draft when this many substantive messages have overtaken it (never for a direct question). */
+export const STALE_AFTER_MESSAGES = 3;
 
 export function typingMs(chars: number, random: () => number = Math.random): number {
   // Do not make an already-generated reply wait through a long pretend typing session.
-  return Math.min(6_000, (chars / uniform(TYPING_CPS[0], TYPING_CPS[1], random)) * 1000);
+  return Math.min(TYPING_CAP_MS, (chars / uniform(TYPING_CPS[0], TYPING_CPS[1], random)) * 1000);
 }
 
 /**

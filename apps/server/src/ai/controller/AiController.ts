@@ -11,8 +11,9 @@ import type {
 import type { MuseCallFn } from "../muse.js";
 import { median, oneLine, pick, sleep, truncateAtWord, uniform } from "../util.js";
 import {
-  ADDRESSED_REPLY_P, DISCUSS_OPENER_P, PAIR_OPENER_P, PAIR_REPLY_P,
-  asksForChatReply, classifyMessage, isLowValueChat, isResolvedChat, replyProbability, type Addressing,
+  ADDRESSED_REPLY_P, DISCUSS_OPENER_P, PAIR_OPENER_P, PAIR_REPLY_P, REPLY_WINDOW_MS,
+  asksForChatReply, classifyMessage, isGroupQuestion, isLowValueChat, isResolvedChat, mentionsNickname,
+  replyProbability, type Addressing,
 } from "./cadence.js";
 import { VOUCH_P, chooseFinalVote, chooseSuspicionVote, nicknameOf, voteNote, vouchNote } from "./decisions.js";
 import type { ControllerDeps, HumannessDeps, PlayerTurnContext, SessionMemory } from "./deps.js";
@@ -129,6 +130,8 @@ export class AiController implements AiPlayer {
   private chatTimer: Timer | null = null;
   private myGroupCount = 0;
   private humanGroupCounts = new Map<PlayerId, number>();
+  /** Set once the conversation involves us this phase (we were mentioned, or chose to reply): no opener after that. */
+  private openerBlocked = false;
 
   // Per game.
   private readonly lastSentAt: Record<Channel, number> = { group: -Infinity, pair: -Infinity };
@@ -310,6 +313,7 @@ export class AiController implements AiPlayer {
     this.pendingChat = null;
     this.myGroupCount = 0;
     this.humanGroupCounts = new Map();
+    this.openerBlocked = false;
 
     switch (phase) {
       case "answer":
@@ -406,7 +410,8 @@ export class AiController implements AiPlayer {
     if (this.random() >= DISCUSS_OPENER_P) return;
     const p = this.phase!;
     this.at(p.startedAt + uniform(6_000, 14_000, this.random), () => {
-      if (this.myGroupCount > 0 || this.humanGroupCounts.size > 0) return;
+      // React to the answers even if others have started talking, unless the chat already involves us.
+      if (this.myGroupCount > 0 || this.openerBlocked) return;
       this.requestChat({
         key: p.key, channel: "group", trigger: { kind: "phaseStart" },
         triggerAt: this.now(), addressed: false, accused: false,
@@ -532,13 +537,32 @@ export class AiController implements AiPlayer {
 
   /** Roll whether to answer a human group message. Null = stay quiet. */
   private decideGroupReply(msg: ChatMessage): Addressing | null {
-    if (isLowValueChat(msg.text, this.myNickname())) return null;
     const a = classifyMessage(msg.text, this.myNickname(), this.myAnswers);
+    if (a.addressed) this.openerBlocked = true;
+    if (isLowValueChat(msg.text, this.myNickname())) return null;
     if (a.accused) return a;
-    a.addressed = a.addressed && asksForChatReply(msg.text);
+    // Aimed at us: a question that names us, a question to the whole group, or a reply right after our own message.
+    a.addressed = (a.addressed && asksForChatReply(msg.text))
+      || (isGroupQuestion(msg.text) && !this.mentionsAnotherPlayer(msg))
+      || this.isReplyToMe(msg);
     const counts = this.humans().map((id) => this.humanGroupCounts.get(id) ?? 0);
     const p = a.addressed ? ADDRESSED_REPLY_P : replyProbability(median(counts), this.myGroupCount);
-    return this.random() < p ? a : null;
+    if (this.random() >= p) return null;
+    this.openerBlocked = true;
+    return a;
+  }
+
+  /** The message names some other player, so it's aimed at them rather than at everyone or us. */
+  private mentionsAnotherPlayer(msg: ChatMessage): boolean {
+    return (this.view?.players ?? []).some((p) => p.id !== this.aiId && p.id !== msg.from && mentionsNickname(msg.text, p.nickname));
+  }
+
+  /** The message comes right after our own group message (and isn't aimed at someone else): a reply to us. */
+  private isReplyToMe(msg: ChatMessage): boolean {
+    const group = (this.view?.messages ?? []).filter((m) => m.channel === "group");
+    const index = group.findIndex((m) => m.id === msg.id);
+    const previous = index > 0 ? group[index - 1] : undefined;
+    return previous?.from === this.aiId && msg.at - previous.at <= REPLY_WINDOW_MS && !this.mentionsAnotherPlayer(msg);
   }
 
   /** Batch a burst into one turn; wait out the send gap before generating a fresh reply. */
@@ -574,7 +598,8 @@ export class AiController implements AiPlayer {
     if (resolved()) return;
     const contextIds = new Set((this.view?.messages ?? []).map(m => m.id));
     const refreshIfStale = async (): Promise<boolean> => {
-      if (req.trigger.kind !== "message") return false;
+      // A direct question or accusation gets answered as drafted; a newer one is handled next turn.
+      if (req.trigger.kind !== "message" || req.addressed || req.accused) return false;
       const pairId = req.trigger.message.pairId;
       const newer = (this.view?.messages ?? []).filter(m => m.channel === req.channel && m.pairId === pairId && m.from !== this.aiId && !contextIds.has(m.id) && !isLowValueChat(m.text, this.myNickname(), req.channel === "group"));
       const newQuestion = this.pendingChat?.addressed && this.pendingChat.trigger.kind === "message" && !contextIds.has(this.pendingChat.trigger.message.id);
