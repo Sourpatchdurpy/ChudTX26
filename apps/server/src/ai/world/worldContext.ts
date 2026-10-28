@@ -1,7 +1,7 @@
 // World context for the persona: one cached Responses call with web_search,
 // shared by every room in the process. Never throws. Logs counts only, never content.
 import type { WorldContext } from "@game/shared";
-import { museResponses } from "../muse.js";
+import { museResponses, usingMeta } from "../muse.js";
 import { oneLine, truncateAtWord, withTimeout } from "../util.js";
 import { HACKTX_FACTS } from "./hacktx-facts.js";
 
@@ -66,6 +66,8 @@ function isFresh(e: Entry, now: number): boolean {
  */
 export async function getWorldContext(): Promise<WorldContext> {
   try {
+    // web_search is Meta-only: on another provider the AI just knows the HackTX facts.
+    if (!usingMeta()) return fallbackValue();
     if (cache) {
       if (!inFlight && !isFresh(cache, Date.now())) void refresh();
       return cache.value;

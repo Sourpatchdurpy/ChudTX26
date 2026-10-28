@@ -80,7 +80,17 @@ describe("getWorldContext", () => {
     mock.restoreAll();
     setMuseResponsesForTests(null);
     delete process.env.WORLD_CONTEXT_TTL_MS;
+    delete process.env.AI_BASE_URL;
     resetWorldContextForTests();
+  });
+
+  test("on another provider (AI_BASE_URL) there's no web search: HackTX facts only, no call", async () => {
+    process.env.AI_BASE_URL = "https://models.example.com/v1";
+    fakeResponses(() => GOOD);
+    const ctx = await getWorldContext();
+    assert.equal(seen.length, 0);
+    assert.deepEqual([ctx.trending, ctx.news, ctx.local, ctx.weather], [[], [], [], null]);
+    assert.deepEqual(ctx.hacktx, HACKTX_FACTS);
   });
 
   test("one web_search Responses call with a strict schema, sanitized result", async () => {

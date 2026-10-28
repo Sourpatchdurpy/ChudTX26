@@ -3,11 +3,13 @@
 // reasoning clamps, a per-process budget cap, a per-minute rate cap, a timeout,
 // and at most one retry (timeout / 429 / 5xx only). Logs token usage and the
 // estimated cost of every call; never logs prompts, model output or the key.
+// AI_BASE_URL can point it at another OpenAI-compatible provider instead (e.g. a
+// free tier after the hackathon); see forProvider().
 import OpenAI from "openai";
 import type { MuseCall, MuseChatRequest } from "@game/shared";
 import { AbortedError, TimeoutError, oneLine, truncateAtWord } from "./util.js";
 
-const BASE_URL = "https://api.meta.ai/v1";
+const META_BASE_URL = "https://api.meta.ai/v1";
 const DEFAULT_MODEL = "muse-spark-1.3";
 const MAX_COMPLETION_TOKENS = 1000;
 /** A retry starts only with at least this long left before the caller's deadline (PART_2_DESIGN §3.2.1). */
@@ -94,9 +96,22 @@ const budgetLabel = () => (Number.isFinite(budgetUsd()) ? String(budgetUsd()) : 
 /** 0 blocks every call. */
 const maxCallsPerMin = () => envNumber("MUSE_MAX_CALLS_PER_MIN", 60, 0);
 
+function baseUrl(): string {
+  return process.env.AI_BASE_URL?.trim().replace(/\/+$/, "") || META_BASE_URL;
+}
+
+/** Meta's Model API: Muse-only request fields, Meta pricing and the built-in web_search tool. */
+export function usingMeta(): boolean {
+  return baseUrl() === META_BASE_URL;
+}
+
 function museModel(): string {
-  const model = process.env.MUSE_MODEL?.trim() || DEFAULT_MODEL;
-  if (/contributor/i.test(model)) {
+  const model = process.env.MUSE_MODEL?.trim() || (usingMeta() ? DEFAULT_MODEL : "");
+  if (!model) {
+    warnOnce("nomodel", "[muse] AI_BASE_URL is set but MUSE_MODEL is not: the AI will use fallbacks");
+    throw new MuseUnavailableError("MUSE_MODEL is not set for AI_BASE_URL");
+  }
+  if (usingMeta() && /contributor/i.test(model)) {
     // MASTER_PLAN §8: Meta may train on -contributor traffic, and players' chats are private.
     warnOnce("contributor", `[muse] refusing MUSE_MODEL=${model} (a -contributor model); using ${DEFAULT_MODEL}`);
     return DEFAULT_MODEL;
@@ -120,8 +135,10 @@ function getClient(): MuseClientLike {
     throw new MuseUnavailableError("MODEL_API_KEY is not set");
   }
   try {
+    const baseURL = baseUrl();
+    if (!usingMeta()) console.log(`[muse] using ${new URL(baseURL).host} instead of Meta's Model API (no web search, no cost estimate)`);
     const openai = new OpenAI({
-      baseURL: BASE_URL,
+      baseURL,
       apiKey,
       maxRetries: 0, // our single retry is the only retry; the SDK's own would double-spend
       // Never let OPENAI_* env vars send other credentials or headers to Meta, or log request bodies.
@@ -351,7 +368,8 @@ async function runGuarded<T>(ep: Endpoint<T>, label: string, room: string, opts:
 
     const ms = Math.round(performance.now() - started);
     const u = ep.usage(res);
-    const cost = estimateCostUsd(u);
+    // Meta's prices; another provider's spend isn't tracked (assumed to be a free tier).
+    const cost = usingMeta() ? estimateCostUsd(u) : 0;
     bump(room, (s) => {
       s.promptTokens += u.promptTokens;
       s.cachedTokens += u.cachedTokens;
@@ -396,10 +414,24 @@ interface ChatResponseLike {
   } | null;
 }
 
+/**
+ * Other providers don't know Muse-only fields: `developer` messages become `system`,
+ * prompt_cache_key is dropped, and reasoning_effort is AI_REASONING_EFFORT (unset: not sent).
+ */
+function forProvider(body: Record<string, unknown>): Record<string, unknown> {
+  if (usingMeta()) return body;
+  const { prompt_cache_key: _cacheKey, reasoning_effort: _effort, ...rest } = body;
+  const effort = process.env.AI_REASONING_EFFORT?.trim();
+  const messages = Array.isArray(rest.messages)
+    ? rest.messages.map((m: unknown) => (asObject(m).role === "developer" ? { ...asObject(m), role: "system" } : m))
+    : rest.messages;
+  return { ...rest, messages, ...(effort ? { reasoning_effort: effort } : {}) };
+}
+
 /** chat.completions.create with every guardrail; returns JSON.parse(choices[0].message.content). */
 export const museCall: MuseCallFn = async <T>(req: MuseChatRequest, opts: MuseCallOptions = {}): Promise<T> => {
   if (callOverride) return callOverride<T>(req, opts);
-  const body: Record<string, unknown> = { ...clampRequest(req, opts.label), model: museModel() };
+  const body = forProvider({ ...clampRequest(req, opts.label), model: museModel() });
   const room = opts.roomCode || req.prompt_cache_key || "-";
   return runGuarded<T>(
     {
@@ -509,6 +541,7 @@ function parseJsonLoose(text: string): { value: unknown } | null {
 /** responses.create with the same budget, rate, timeout and retry guardrails (no clamps). */
 export async function museResponses<T>(body: Record<string, unknown>, opts: MuseCallOptions = {}): Promise<T> {
   if (responsesOverride) return responsesOverride<T>(body, opts);
+  if (!usingMeta()) throw new MuseUnavailableError("web_search needs Meta's Model API (AI_BASE_URL is set)");
   const fullBody: Record<string, unknown> = { ...body, model: museModel() };
   return runGuarded<T>(
     {

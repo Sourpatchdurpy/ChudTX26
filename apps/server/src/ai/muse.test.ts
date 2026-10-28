@@ -96,7 +96,7 @@ const req = (over: Partial<MuseChatRequest> = {}): MuseChatRequest => ({
   ...over,
 });
 
-const ENV_KEYS = ["MUSE_MODEL", "MUSE_TIMEOUT_MS", "MUSE_BUDGET_USD", "MUSE_MAX_CALLS_PER_MIN"] as const;
+const ENV_KEYS = ["MUSE_MODEL", "MUSE_TIMEOUT_MS", "MUSE_BUDGET_USD", "MUSE_MAX_CALLS_PER_MIN", "AI_BASE_URL", "AI_REASONING_EFFORT"] as const;
 let savedEnv: Record<string, string | undefined> = {};
 let logs: string[] = [];
 const realConsole = { log: console.log, warn: console.warn, error: console.error };
@@ -462,6 +462,50 @@ describe("missing key", () => {
     } finally {
       if (saved !== undefined) process.env.MODEL_API_KEY = saved;
     }
+  });
+});
+
+describe("another provider (AI_BASE_URL)", () => {
+  test("drops Muse-only fields, sends developer rules as system, and estimates no cost", async () => {
+    process.env.AI_BASE_URL = "https://models.example.com/v1/";
+    process.env.MUSE_MODEL = "vendor/small-model";
+    const fake = installFake([ok({ a: 1 })]);
+    await museCall(req(), { label: "group" });
+    const body = fake.chat[0]!.body;
+    assert.equal(body.model, "vendor/small-model");
+    assert.equal("prompt_cache_key" in body, false);
+    assert.equal("reasoning_effort" in body, false);
+    assert.equal(body.max_completion_tokens, 600);
+    assert.deepEqual((body.messages as { role: string }[]).map((m) => m.role), ["system", "user"]);
+    assert.equal(getMuseStats("ABCD").calls, 1, "the room still comes from prompt_cache_key");
+    assert.equal(getMuseStats().costUsd, 0);
+  });
+
+  test("AI_REASONING_EFFORT is sent as given", async () => {
+    process.env.AI_BASE_URL = "https://models.example.com/v1";
+    process.env.MUSE_MODEL = "vendor/small-model";
+    process.env.AI_REASONING_EFFORT = "low";
+    const fake = installFake([ok({ a: 1 })]);
+    await museCall(req());
+    assert.equal(fake.chat[0]!.body.reasoning_effort, "low");
+  });
+
+  test("without MUSE_MODEL nothing is sent; web search is never attempted", async () => {
+    process.env.AI_BASE_URL = "https://models.example.com/v1";
+    const fake = installFake([ok({ a: 1 })], [ok({ a: 1 })]);
+    await assert.rejects(museCall(req()), MuseUnavailableError);
+    process.env.MUSE_MODEL = "vendor/small-model";
+    await assert.rejects(museResponses({ input: "x" }), MuseUnavailableError);
+    assert.equal(fake.chat.length + fake.responses.length, 0);
+  });
+
+  test("the Meta URL itself (with a trailing slash) keeps Muse behavior", async () => {
+    process.env.AI_BASE_URL = "https://api.meta.ai/v1/";
+    const fake = installFake([ok({ a: 1 })]);
+    await museCall(req());
+    assert.equal(fake.chat[0]!.body.model, "muse-spark-1.3");
+    assert.equal(fake.chat[0]!.body.prompt_cache_key, "ABCD");
+    assert.ok(getMuseStats().costUsd > 0);
   });
 });
 
