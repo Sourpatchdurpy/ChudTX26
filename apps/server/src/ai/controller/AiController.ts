@@ -12,7 +12,7 @@ import type { MuseCallFn } from "../muse.js";
 import { median, oneLine, pick, sleep, truncateAtWord, uniform } from "../util.js";
 import {
   ADDRESSED_REPLY_P, DISCUSS_OPENER_P, PAIR_OPENER_P, PAIR_REPLY_P, REPLY_WINDOW_MS,
-  asksForChatReply, classifyMessage, isGroupQuestion, isLowValueChat, isResolvedChat, mentionsNickname,
+  asksForChatReply, classifyMessage, isGroupQuestion, isJustAgreement, isLowValueChat, isResolvedChat, mentionsNickname,
   replyProbability, type Addressing,
 } from "./cadence.js";
 import { VOUCH_P, chooseFinalVote, chooseSuspicionVote, nicknameOf, voteNote, vouchNote } from "./decisions.js";
@@ -559,6 +559,7 @@ export class AiController implements AiPlayer {
 
   /** The message comes right after our own group message (and isn't aimed at someone else): a reply to us. */
   private isReplyToMe(msg: ChatMessage): boolean {
+    if (isJustAgreement(msg.text)) return false; // "same tbh" doesn't need an answer; the ordinary roll still applies
     const group = (this.view?.messages ?? []).filter((m) => m.channel === "group");
     const index = group.findIndex((m) => m.id === msg.id);
     const previous = index > 0 ? group[index - 1] : undefined;

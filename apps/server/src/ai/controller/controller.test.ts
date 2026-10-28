@@ -10,7 +10,7 @@ import type {
 } from "@game/shared";
 import type { MuseCallFn, MuseCallOptions } from "../muse.js";
 import { AiController } from "./AiController.js";
-import { classifyMessage, isGroupQuestion, mentionsNickname, quotesAnswer, replyProbability } from "./cadence.js";
+import { classifyMessage, isGroupQuestion, isJustAgreement, mentionsNickname, quotesAnswer, replyProbability } from "./cadence.js";
 import {computeSendAt} from "./timing.js";
 import { chooseFinalVote, chooseSuspicionVote } from "./decisions.js";
 import type { HumannessDeps, PlayerTurnContext, SessionMemory } from "./deps.js";
@@ -234,6 +234,11 @@ describe("cadence helpers", () => {
     assert.ok(isGroupQuestion("which one are yall picking"));
     assert.ok(!isGroupQuestion("everyone picked tacos lol"), "not a question");
     assert.ok(!isGroupQuestion("which spot tho?"), "a question, but not to the group");
+  });
+
+  test("bare agreement is recognized; pushback and questions aren't", () => {
+    for (const t of ["same tbh", "thats so real", "fr fr", "yeah same lol", "That's true"]) assert.ok(isJustAgreement(t), t);
+    for (const t of ["nah tacodeli is overrated", "same but bowling is better", "why that one", "real?", ""]) assert.ok(!isJustAgreement(t), t);
   });
 
   test("even maximum-length chat adds less than 10 seconds of simulated delay",()=>{
@@ -676,6 +681,19 @@ describe("AiController", () => {
     await advance(20_000);
     assert.equal(calls.length, 2);
     assert.equal(game.of("chat").length, 2, "and replied to the reply");
+  });
+
+  test("discuss: bare agreement right after the AI's message doesn't force a reply", async () => {
+    const calls: MuseLog[] = [];
+    const game = new FakeGame({ muse: fakeMuse("ok", calls, 500), random: mid });
+    game.enter("discuss", 1, 45_000, { round: currentRound(1, "light") });
+    game.humanSays("h1", "ok what does everyone actually pick tho?");
+    await advance(6_000);
+    assert.equal(game.of("chat").length, 1);
+    game.humanSays("h2", "same tbh");
+    await advance(20_000);
+    assert.equal(calls.length, 1, "no Muse call: it only gets the ordinary roll, which fails at 0.5");
+    assert.equal(game.of("chat").length, 1);
   });
 
   test("discuss: an answer to a direct question isn't thrown away when the chat moves on", async () => {

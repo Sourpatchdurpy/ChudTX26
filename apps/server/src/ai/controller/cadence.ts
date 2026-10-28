@@ -60,6 +60,18 @@ export function isGroupQuestion(text: string): boolean {
   return asksForChatReply(text) && GROUP_WORDS_RE.test(text);
 }
 
+const AGREEMENT_WORDS = new Set([
+  "same", "real", "true", "facts", "fair", "agreed", "agree", "exactly", "mood", "valid", "based", "w",
+  "so", "too", "that", "thats", "is", "it", "ok", "okay", "yeah", "yea", "ya", "yes", "yep", "yup",
+  "tbh", "fr", "frfr", "ngl", "lol", "lmao", "haha", "omg", "honestly", "literally", "lowkey", "deadass", "here", "me",
+]);
+
+/** Nothing but agreement or filler ("same tbh", "thats so real", "fr fr"): it doesn't ask us anything. */
+export function isJustAgreement(text: string): boolean {
+  const words = text.toLowerCase().replace(/[’']/g, "").replace(/[^\p{L}\p{N}]+/gu, " ").trim().split(" ").filter(Boolean);
+  return words.length > 0 && !asksForChatReply(text) && words.every((w) => AGREEMENT_WORDS.has(w));
+}
+
 /**
  * Chance to reply to a group message that wasn't addressed to us, from this phase's counts:
  * talk about as much as the median human (playtesters found the AI too quiet at 0.12–0.35).
